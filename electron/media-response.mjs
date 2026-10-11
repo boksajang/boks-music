@@ -10,7 +10,8 @@ export async function mediaResponse(file,request) {
   const info=await stat(file);if(!info.isFile())return new Response(null,{status:404});
   const total=info.size;
   const mime={'.mp4':'video/mp4','.mov':'video/quicktime','.jpeg':'image/jpeg','.wav':'audio/wav','.flac':'audio/flac','.mp3':'audio/mpeg','.m4a':'audio/mp4','.ogg':'audio/ogg','.png':'image/png','.jpg':'image/jpeg','.webp':'image/webp'}[path.extname(file).toLowerCase()]||'application/octet-stream';
-  const headers={'Content-Type':mime,'Accept-Ranges':'bytes','Content-Length':String(total)};
+  // Readable by the app's own pages (video preview: album color and spectrum); the scheme exists only inside the app.
+  const headers={'Content-Type':mime,'Accept-Ranges':'bytes','Content-Length':String(total),'Access-Control-Allow-Origin':'*'};
   let start=0,end=total-1,status=200;
   const range=request.headers.get('range');
   if(range){

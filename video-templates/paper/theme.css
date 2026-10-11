@@ -1,4 +1,0 @@
-/* Warm typography-first liner notes. */
-.scene{background:linear-gradient(125deg,#eee8dc,#d9d2c6);color:#252d37}.halo,.orb{display:none}.grid{opacity:.4;background-image:linear-gradient(#5d665c10 1px,transparent 1px);background-size:100% 54px}.topline,.collection,.index,.footer{color:#687477}.art{width:29%;left:9%;top:24%;border-radius:0;transform:rotate(-3deg);border:12px solid #f5f0e6;box-shadow:0 20px 50px #3c352c30}.content{left:47%;top:23%}h1{font-family:Georgia,'Malgun Gothic',serif;font-weight:500}.lyric-line{color:#32404f!important}.rule{background:linear-gradient(90deg,#555b5c65,transparent)}.progress{background:#53666b30}.progress>i{background:#647c86}.portrait .art{left:24%;top:12%;width:52%;border-width:8px}.portrait .content{left:9%;right:9%;top:48%}.portrait .spectrum{bottom:12%}
-
-.footer{gap:24px}.footer-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.clock{flex-shrink:0;white-space:nowrap}

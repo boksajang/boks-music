@@ -2,8 +2,11 @@
   "schemaVersion": 1,
   "id": "cinematic",
   "name": "시네마 플로우",
-  "description": "넓은 풍경 위에 떠오르는 가사",
+  "description": "카메라가 움직이는 영화 장면 위에 크게 떠오르는 가사",
   "order": 5,
+  "renderer": "canvas",
+  "scene": "cinematic",
+  "maxResolution": 2160,
   "requiresBackground": true,
   "aspects": [
     "16:9",
@@ -22,6 +25,5 @@
     "mirror-area",
     "ribbon"
   ],
-  "recommendedSpectrum": "area",
-  "stylesheet": "theme.css"
+  "recommendedSpectrum": "wave"
 }

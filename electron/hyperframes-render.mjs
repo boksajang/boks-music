@@ -10,6 +10,7 @@ import {createVideoComposition} from './video-composition.mjs';
 import {ensureVideoRuntime,runVideoProcess} from './hyperframes-runtime.mjs';
 import {validateVideoOptions,analyzeAudioFrame} from './playlist-video.mjs';
 import {renderCanvasVideo} from './canvas-render.mjs';
+import {CANVAS_SCENE_FILES} from './canvas-scene.mjs';
 async function hashFile(file){const hash=createHash('sha256');for await(const chunk of createReadStream(file))hash.update(chunk);return hash.digest('hex');}
 export function videoWorkerCount(height,{cores=availableParallelism(),freeBytes=freemem()}={}){return height>2160?1:Math.max(1,Math.min(4,Math.floor(cores/2),Math.floor(freeBytes/(2*1024**3))));}
 export async function probeVideoEncoder(ffmpegPath,{signal,log=()=>{},platform=process.platform}={}){
@@ -34,7 +35,7 @@ export async function renderPlaylistVideo({tracks,options:input,outputPath,ffmpe
   const identity=[];
   for(const track of tracks){signal?.throwIfAborted();const info=await parseFile(track.audioPath,{duration:true}),duration=info.format.duration;if(!Number.isFinite(duration)||duration<=0)throw Error('곡 길이를 확인하지 못했습니다.');identity.push({audio:await hashFile(track.audioPath),art:track.artPath?await hashFile(track.artPath):null,title:track.title,cues:track.cues||[],duration});prepared.push({...track,duration});}
   const cycleDuration=prepared.reduce((sum,t)=>sum+t.duration,0),cycleFrames=Math.ceil(cycleDuration*options.fps),alignedCycleDuration=cycleFrames/options.fps,duration=alignedCycleDuration*options.repeat,frames=cycleFrames*options.repeat;
-  const sources=await Promise.all(['./video-composition.mjs','./video-spectrum.mjs','./hyperframes-worker.mjs','./playlist-video.mjs','./hyperframes-render.mjs','./canvas-scene.mjs','./canvas-render.mjs','./canvas-render/page.mjs'].map(f=>readFile(fileURLToPath(new URL(f,import.meta.url)),'utf8')));
+  const sources=await Promise.all(['./video-composition.mjs','./video-spectrum.mjs','./hyperframes-worker.mjs','./playlist-video.mjs','./hyperframes-render.mjs','./canvas-scene.mjs',...CANVAS_SCENE_FILES,'./canvas-render.mjs','./canvas-render/page.mjs'].map(f=>readFile(fileURLToPath(new URL(f,import.meta.url)),'utf8')));
   const cacheKey=createHash('sha256').update(JSON.stringify({pipelineVersion:3,version:runtime.version,source:sources,identity,options:{...options,repeat:1,format:'mp4'},theme:template.themeCss,background:backgroundPath?await hashFile(backgroundPath):null})).digest('hex');
   const cacheDirectory=path.join(runtime.directory,'render-cache');await mkdir(cacheDirectory,{recursive:true});const cached=path.join(cacheDirectory,cacheKey+'.mp4'),receipt=path.join(cacheDirectory,cacheKey+'.json');
   try{const meta=JSON.parse(await readFile(receipt,'utf8'));if(meta.sha256===await hashFile(cached)){await copyFile(cached,cycle,constants.COPYFILE_EXCL);cacheHit=true;encoder=meta.encoder;onProgress({stage:'동일한 영상 구성 재사용 중',progress:90});}}catch(error){if(error.code!=='ENOENT')log('영상 캐시를 다시 생성합니다: '+error.message);}

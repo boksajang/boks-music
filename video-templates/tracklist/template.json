@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "tracklist",
+  "name": "플레이리스트 보드",
+  "description": "돌아가는 CD와 1번부터 흐르는 곡 목록 (경음악 전용)",
+  "order": 7,
+  "renderer": "canvas",
+  "scene": "tracklist",
+  "maxResolution": 2160,
+  "modes": [
+    "instrumental"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "ring",
+    "radial-bars",
+    "double-ring",
+    "radial-dots"
+  ],
+  "recommendedSpectrum": "radial-bars"
+}

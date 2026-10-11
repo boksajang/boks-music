@@ -55,7 +55,7 @@ app.setName('Boks Music');
 app.setAppUserModelId('com.boksajang.boksmusic');
 const ownsInstance=app.requestSingleInstanceLock();
 if(!ownsInstance)app.quit();
-protocol.registerSchemesAsPrivileged([{scheme:'boks-media',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true}}]);
+protocol.registerSchemesAsPrivileged([{scheme:'boks-media',privileges:{standard:true,secure:true,supportFetchAPI:true,stream:true,corsEnabled:true}}]);
 let window,store,queue,system,engines=[],codexModels=[],codexError='',quitting=false,installs={},closeReady=false,closePending=false,closeTimer,quitRequested=false,shutdownStarted=false;
 let codexStatus={state:'checking'},codexUsage={state:'checking'},codexRefresh,usageRefresh;
 let claudeStatus={state:'checking'},claudeRefresh,claudeUsageRefresh,claudeUsageError='';
@@ -407,7 +407,8 @@ const actions={
   videoDestination:async()=>{const result=await dialog.showOpenDialog(window,{title:'영상 저장 폴더 선택',properties:['openDirectory','createDirectory']});if(result.canceled||!result.filePaths?.[0])return {cancelled:true};const directory=await realpath(result.filePaths[0]);if(!(await stat(directory)).isDirectory())throw Error('폴더를 선택하세요.');videoDirectories.add(directory);return {directory};},
   selectVideoBackground:async()=>{const result=await dialog.showOpenDialog(window,{title:'영상 배경 사진 선택',properties:['openFile'],filters:[{name:'Image',extensions:['png','jpg','jpeg','webp']} ]});if(result.canceled||!result.filePaths?.[0])return {cancelled:true};const file=await realpath(result.filePaths[0]);if(!(await stat(file)).isFile()||nativeImage.createFromPath(file).isEmpty())throw Error('읽을 수 있는 사진을 선택하세요.');const key=id();videoBackgrounds.set(key,file);return {path:file,url:`boks-media://video-background/${key}`};},
   renderPlaylistVideo:async p=>{
-    const opts=validateVideoOptions(p.options);if(p.options?.codec&&p.options.codec!=='h264')throw Error('H.264 코덱만 지원합니다.');
+    // The scene shows the video title at the top; the brand line defaults to the saved one.
+    const opts=validateVideoOptions({...p.options,playlistTitle:typeof p.title==='string'?p.title:undefined,brand:p.options?.brand??store.data.settings.videoBrand});if(p.options?.codec&&p.options.codec!=='h264')throw Error('H.264 코덱만 지원합니다.');
     const title=requiredString(p.title,'영상 이름',180),list=findById(store.data.playlists,p.playlistId,'재생목록');
     if(typeof p.directory!=='string'||!videoDirectories.has(p.directory)||await realpath(p.directory)!==p.directory)throw Error('영상 저장 폴더를 선택 창에서 다시 선택하세요.');
     if(p.backgroundPath&&![...videoBackgrounds.values()].includes(p.backgroundPath))throw Error('배경 사진을 선택 창에서 선택하세요.');
@@ -417,6 +418,7 @@ const actions={
     if(!ffmpegPath)throw Error('영상 출력에 필요한 FFmpeg를 찾을 수 없습니다.');
     const safe=title.replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_').replace(/[. ]+$/,'').slice(0,100)||'playlist';
     const outputPath=path.join(p.directory,safe+'-'+id()+'.'+opts.format);
+    if(opts.brand!==store.data.settings.videoBrand)await store.mutate(data=>{data.settings.videoBrand=opts.brand;});
     const [job]=await queue.add([{operation:'video',playlistId:list.id,trackIds:rows.map(t=>t.id),title,options:opts,directory:p.directory,outputPath,backgroundPath,ffmpegPath,settings:{...store.data.settings}}]);return {jobId:job.id};
   },
   resumeVideo:async p=>{
@@ -428,7 +430,12 @@ const actions={
       if(!check.ready)throw new Error('가사가 없는 곡에 가사를 입력하세요.');
       if(check.needsConfirmation.length)throw new Error('확인이 필요한 가사 구간을 맞춘 뒤 영상 제작을 계속하세요.');
       if(previous.status!=='needs-confirmation')throw new Error('이 영상 작업은 이미 변경되었습니다.');
-      const job=await queue.resume(previous.id,{...previous.request,settings:{...store.data.settings}});return {jobId:job.id};
+      // Jobs saved before the GPU templates: same template id (cinematic-gpu → cinematic), at most the
+      // template's resolution (8K → 4K), and the scene text the video window now sets.
+      const saved=previous.request.options||{},template=getVideoTemplate(saved.template==='cinematic-gpu'?'cinematic':saved.template);
+      const options=validateVideoOptions({...saved,resolution:template.maxResolution?Math.min(saved.resolution,template.maxResolution):saved.resolution,brand:saved.brand??store.data.settings.videoBrand,playlistTitle:saved.playlistTitle??previous.request.title});
+      if(options.resolution!==saved.resolution)log(`이 템플릿은 최대 ${template.maxResolution}p까지 지원해 ${saved.resolution}p 대신 ${options.resolution}p로 이어서 제작합니다.`,previous.id);
+      const job=await queue.resume(previous.id,{...previous.request,options,settings:{...store.data.settings}});return {jobId:job.id};
     }finally{resumingVideos.delete(previous.id);}
   },
   updateTrackText:async p=>{
@@ -665,7 +672,7 @@ async function createWindow(){
   window.webContents.on('before-input-event',(event,input)=>{if(htmlFullscreen&&input.type==='keyDown'&&input.key==='Escape'){event.preventDefault();void window.webContents.executeJavaScript('document.fullscreenElement ? document.exitFullscreen() : undefined',true).catch(log);}});
   const devURL=!app.isPackaged&&process.env.BOKS_DEV_URL;
   if(devURL&&!/^http:\/\/127\.0\.0\.1:\d+$/.test(devURL))throw new Error('개발 서버는 127.0.0.1 주소만 허용합니다.');
-  const csp=`default-src 'self'; script-src 'self'${devURL?" 'unsafe-inline'":''}; style-src 'self' 'unsafe-inline'; img-src 'self' data: boks-media:; media-src 'self' boks-media:; connect-src 'self'${devURL?' '+devURL.replace('http:','ws:'):''}; object-src 'none'; base-uri 'none'`;
+  const csp=`default-src 'self'; script-src 'self'${devURL?" 'unsafe-inline'":''}; style-src 'self' 'unsafe-inline'; img-src 'self' data: boks-media:; media-src 'self' boks-media:; connect-src 'self' boks-media:${devURL?' '+devURL.replace('http:','ws:'):''}; object-src 'none'; base-uri 'none'`;
   window.webContents.session.webRequest.onHeadersReceived((details,callback)=>callback({responseHeaders:{...details.responseHeaders,'Content-Security-Policy':[csp]}}));
   window.once('ready-to-show',()=>window.show());
   window.on('close',event=>{if(quitting||closeReady)return;event.preventDefault();requestClose(!isMac);});

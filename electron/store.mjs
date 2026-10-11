@@ -8,7 +8,7 @@ import {claudeModels,claudeEfforts,agentProviders} from './claude.mjs';
 
 export function initialState(root) {
   return { version: 1, projects: [], tracks: [], playlists: [], videos: [], retainedAssets: [], customPresets: [], jobs: [], settings: {
-    defaultCount: 1, autoAlbumArt: false, textModel: '', imageModel: '', textReasoning: 'medium', imageReasoning: 'medium', imageEngine: 'agent', localImageModel: '',
+    defaultCount: 1, autoAlbumArt: false, textModel: '', imageModel: '', textReasoning: 'medium', imageReasoning: 'medium', imageEngine: 'agent', localImageModel: '', videoBrand: 'BOKS MUSIC',
     agentProvider: '', agentChoiceConfirmed: false, claudeModel: '', claudeReasoning: 'medium',
     projectPath: path.join(root,'projects'), modelPath: path.join(root,'models'),
     engineSelection:{...defaultEngineSelection}, musicBackend: 'yue2-cpp', nativeBackend: 'cuda', nativeExecutable: '', backbonePath: '', vaePath: '', transcriberPath: '',
@@ -43,6 +43,7 @@ export class Store {
       if(typeof data.settings.agentChoiceConfirmed!=='boolean')data.settings.agentChoiceConfirmed=false;
       if(!['agent','local'].includes(data.settings.imageEngine))data.settings.imageEngine='agent';
       if(typeof data.settings.localImageModel!=='string')data.settings.localImageModel='';
+      if(typeof data.settings.videoBrand!=='string'||data.settings.videoBrand.length>40)data.settings.videoBrand='BOKS MUSIC';
       if(!claudeModels.some(model=>model.id===data.settings.claudeModel))data.settings.claudeModel='';
       if(!claudeEfforts.includes(data.settings.claudeReasoning))data.settings.claudeReasoning='medium';
       if(data.claudeUsage!==undefined&&(!data.claudeUsage||typeof data.claudeUsage!=='object'||data.claudeUsage.state!=='ready'))delete data.claudeUsage;

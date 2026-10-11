@@ -1,21 +1,25 @@
 {
   "schemaVersion": 1,
   "id": "paper",
-  "name": "소프트 페이퍼",
-  "description": "따뜻한 종이색과 절제된 타이포그래피",
+  "name": "페이퍼 플레이어",
+  "description": "종이 위 플레이어 카드와 돌아가는 레코드",
   "order": 4,
+  "renderer": "canvas",
+  "scene": "paper",
+  "maxResolution": 2160,
   "requiresBackground": false,
   "aspects": [
     "16:9",
     "9:16"
   ],
   "spectra": [
-    "wave",
-    "double-wave",
     "bars",
     "round-bars",
-    "dots"
+    "mirror",
+    "blocks",
+    "dots",
+    "wave",
+    "double-wave"
   ],
-  "recommendedSpectrum": "wave",
-  "stylesheet": "theme.css"
+  "recommendedSpectrum": "round-bars"
 }

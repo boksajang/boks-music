@@ -1,9 +1,12 @@
 {
   "schemaVersion": 1,
   "id": "albumblur",
-  "name": "미드나이트 에디토리얼",
-  "description": "넓은 여백과 푸른 빛, 천천히 흐르는 가사",
+  "name": "앨범 블러",
+  "description": "흐린 앨범아트가 흐르고, 떠 있는 앨범 옆으로 가사가 지나갑니다",
   "order": 1,
+  "renderer": "canvas",
+  "scene": "albumblur",
+  "maxResolution": 2160,
   "requiresBackground": false,
   "aspects": [
     "16:9",
@@ -22,6 +25,5 @@
     "mirror-area",
     "ribbon"
   ],
-  "recommendedSpectrum": "wave",
-  "stylesheet": "theme.css"
+  "recommendedSpectrum": "wave"
 }

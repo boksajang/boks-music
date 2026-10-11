@@ -54,7 +54,7 @@ npm start
 | 가사 시간 정렬 | Qwen3-ASR-1.7B · Qwen3-ForcedAligner-0.6B + 가사 기반 onset 추정 | 동일 |
 | 앨범아트(로컬) | [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) (CUDA / Vulkan / CPU) + Z-Image Turbo · FLUX.2 klein 4B GGUF | stable-diffusion.cpp (Metal) |
 | 앨범아트(에이전트) | Codex CLI 이미지 도구 | 동일 |
-| 가사 영상 렌더링 | HyperFrames(HTML 템플릿) · 내장 Canvas 장면(GPU) + FFmpeg | 동일 |
+| 가사 영상 렌더링 | 내장 템플릿 7종: Canvas 장면(GPU) + WebCodecs 하드웨어 H.264(최대 4K) · 사용자 추가 HTML 템플릿: HyperFrames · 결합·검증: FFmpeg | 동일 |
 | YouTube 가져오기 | yt-dlp + FFmpeg | 동일 |
 | AI 작사 · 앨범아트 설명문 | Claude Code CLI / Codex CLI | 동일 |
 

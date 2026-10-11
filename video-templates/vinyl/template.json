@@ -1,9 +1,12 @@
 {
   "schemaVersion": 1,
   "id": "vinyl",
-  "name": "오비트 라운지",
-  "description": "앨범을 감싸는 원형 스펙트럼",
+  "name": "바이닐 라운지",
+  "description": "레코드가 슬리브에서 나와 돌고, 톤암이 내려앉습니다",
   "order": 3,
+  "renderer": "canvas",
+  "scene": "vinyl",
+  "maxResolution": 2160,
   "requiresBackground": false,
   "aspects": [
     "16:9",
@@ -15,6 +18,5 @@
     "double-ring",
     "radial-dots"
   ],
-  "recommendedSpectrum": "ring",
-  "stylesheet": "theme.css"
+  "recommendedSpectrum": "ring"
 }

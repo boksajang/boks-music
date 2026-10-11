@@ -1,8 +1,9 @@
-import { createCanvasScene, unpackAnalysis } from '../canvas-scene.mjs';
+import { createCanvasScene, unpackAnalysis, boundedBitmap } from '../canvas-scene.mjs';
 
 // Frames are drawn at exact timestamps (frame / fps), never wall-clock time, so output is smooth at any speed.
 const bridge = window.boksCanvasRender;
-const bitmap = async bytes => (bytes ? createImageBitmap(new Blob([bytes])) : null);
+// Album art is drawn at most about a frame's short side; long playlists keep every song's art in memory.
+const bitmap = async (bytes, limit) => (bytes ? boundedBitmap(new Blob([bytes]), limit) : null);
 async function encoderConfig({ width, height, fps, bitrate }) {
   const area = width * height, rate = area * fps;
   // H.264 High profile level sized to the frame (4.0 → 1080p30, 4.2 → 1080p60, 5.1 → 4K30, 5.2 → 4K60).
@@ -17,7 +18,7 @@ async function encoderConfig({ width, height, fps, bitrate }) {
 bridge.onJob(async job => {
   try {
     const started = performance.now();
-    const [background, ...arts] = await Promise.all([bitmap(job.background), ...job.arts.map(bitmap)]);
+    const [background, ...arts] = await Promise.all([bitmap(job.background, 4096), ...job.arts.map(bytes => bitmap(bytes, Math.min(2048, Math.max(1024, Math.min(job.width, job.height)))))]);
     const scene = createCanvasScene({ scene: job.scene, width: job.width, height: job.height, tracks: job.tracks, options: job.options, images: { background, arts }, analyses: job.analyses.map(unpackAnalysis) });
     const canvas = new OffscreenCanvas(job.width, job.height), ctx = canvas.getContext('2d', { alpha: false });
     const { config, hardware } = await encoderConfig(job);

@@ -1,4 +1,0 @@
-/* The signal is the main visual; lyrics retain an independent lane. */
-.scene{background:radial-gradient(ellipse at 35% 60%,#23314c,#0a1221 65%)}.art{display:none}.content{left:57%;right:6%;top:26%}.spectrum{left:6%;width:44%;height:38%;bottom:26%}.rule{width:75%}.orb{left:-20%;top:20%;width:70%}.portrait .content{left:9%;right:9%;top:13%}.portrait .spectrum{left:10%;width:80%;height:23%;bottom:17%}.portrait .lyrics{margin-top:calc(var(--u)*.05)}.portrait .instrumental{top:35%}
-
-.footer{gap:24px}.footer-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.clock{flex-shrink:0;white-space:nowrap}

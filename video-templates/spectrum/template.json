@@ -2,8 +2,11 @@
   "schemaVersion": 1,
   "id": "spectrum",
   "name": "사운드 갤러리",
-  "description": "음악의 움직임이 주인공인 장면",
+  "description": "돌아가는 앨범 원반과 음악에 맞춰 퍼지는 빛",
   "order": 6,
+  "renderer": "canvas",
+  "scene": "spectrum",
+  "maxResolution": 2160,
   "requiresBackground": false,
   "aspects": [
     "16:9",
@@ -27,6 +30,5 @@
     "radial-dots",
     "ellipse"
   ],
-  "recommendedSpectrum": "mirror",
-  "stylesheet": "theme.css"
+  "recommendedSpectrum": "ring"
 }
