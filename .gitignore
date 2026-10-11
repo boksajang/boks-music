@@ -55,10 +55,17 @@ docs/
 !/video-templates/README.md
 
 # Development records, verification scripts and logs stay local
+/tests/
+test_*.py
+*_test.py
+*.test.*
+*-test.mjs
+*_probe.py
+*-probe.*
+*-benchmark.*
 /scripts/*
 !/scripts/dev.mjs
 !/scripts/icons.mjs
-!/scripts/smoke.mjs
 /evaluate.mjs
 /.ignore
 

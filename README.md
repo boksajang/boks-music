@@ -18,9 +18,6 @@
 npm ci
 npm run dev
 ```
-
-테스트는 `npm test`, 타입 검사는 `npm run typecheck`로 실행합니다.
-
 ## 설치 구조
 
 엔진과 모델은 저장소에 포함되지 않습니다. 앱의 **환경설정**에서 PC 사양(GPU·VRAM·RAM·디스크)을 분석해 추천 구성을 보여 주고, **자동 설치** 또는 모델 콤보박스에서 YuE2 구성 하나를 고르면 필요한 실행 엔진·Cover·Stem·FFmpeg·Python 환경을 함께 설치합니다. 내려받는 파일은 모두 크기와 SHA-256이 고정된 사전 빌드본이며, 설치할 수 없는 구성은 이유와 함께 표시합니다.
@@ -70,5 +67,4 @@ AI 에이전트는 로컬 CLI의 구독 로그인으로만 실행하며 유료 A
 | `engines/` | Python 엔진 스크립트(Stem 분리, 가사 정렬)와 모델 카탈로그 |
 | `video-templates/` | 가사 영상 템플릿(HTML/CSS). 추가 방법은 [video-templates/README.md](video-templates/README.md) |
 | `assets/` | 앱 아이콘 |
-| `tests/` | 자동 테스트 |
-| `scripts/` | 개발 실행, 아이콘 생성, 스모크 테스트 |
+| `scripts/` | 개발 실행(`dev.mjs`), 아이콘 생성(`icons.mjs`) |
