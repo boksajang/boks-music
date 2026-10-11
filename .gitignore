@@ -48,6 +48,20 @@ library.json.*
 credentials*.json
 auth.json
 
+# Documents stay local: only the user guides below are published
+*.md
+docs/
+!/README.md
+!/video-templates/README.md
+
+# Development records, verification scripts and logs stay local
+/scripts/*
+!/scripts/dev.mjs
+!/scripts/icons.mjs
+!/scripts/smoke.mjs
+/evaluate.mjs
+/.ignore
+
 # Local tool settings and OS files
 .claude/settings.local.json
 .vscode/

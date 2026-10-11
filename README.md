@@ -1,79 +1,92 @@
 # Boks Music by @boksajang
 
-Windows용 Project 중심 AI 음악 제작 앱입니다. 현재는 개발 프리뷰입니다. RTX 5080의 Windows CUDA 환경에서 자동 설치와 실제 음악 생성·Instrumental·Cover·Stem·앨범아트 등 15개 통합 검사를 통과했습니다. 청취 품질 평가는 별도입니다.
+프로젝트 단위로 AI 음악을 만들고 관리하는 데스크톱 앱입니다. 음악 생성, Cover, Stem 분리, AI 작사, 앨범아트, 가사 영상 제작을 한 곳에서 처리합니다. 현재 개발 프리뷰입니다.
 
-## 개발 실행
+## 요구 사항
 
-Windows와 Node.js 22.12 이상에서 프로젝트 폴더를 열어 실행합니다.
+| 항목 | 내용 |
+|---|---|
+| 운영체제 | Windows 10/11 (NVIDIA GPU 권장, CUDA) · macOS Apple Silicon (Metal, 실제 설치·추론 미검증) |
+| Node.js | 22.12 이상 |
+| 메모리 | RAM 16GB 이상, 음악 모델 구성에 따라 VRAM 6GB 이상 |
+| 디스크 | 음악 모델 구성에 따라 35~39GB 이상 여유 공간 |
+| AI 작사·앨범아트 설명문 | 구독 계정으로 로그인한 Claude Code CLI 또는 Codex CLI (선택) |
+
+## 실행
 
 ```powershell
 npm ci
 npm run dev
 ```
 
-개발 중에는 항상 `npm run dev`로 실행합니다. 사용자가 별도로 요청하기 전에는 앱 빌드, 설치 파일 제작, 엔진 소스 컴파일을 진행하지 않습니다. 회귀 테스트는 `npm test`로 실행합니다.
+테스트는 `npm test`, 타입 검사는 `npm run typecheck`로 실행합니다.
 
-## 사용 순서
+## 처음 사용하기
 
-1. Project를 만듭니다. 가사·스타일 초안과 생성 결과가 해당 Project에 저장됩니다.
-2. 설정에서 감지한 GPU·VRAM과 Music·VAE·Cover·Backend·Stem 추천 구성을 확인하고 **자동 설치**를 누릅니다. RTX 5080 16GB에는 메모리 여유를 고려한 Q8_0 구성을 추천합니다.
-3. 직접 고르려면 **모델 콤보박스에서 YuE2 구성 하나를 선택합니다.** 설치할 수 없는 구성도 선택할 수 있고 구체적인 사유를 표시합니다. 필요한 Windows 실행 엔진, VAE, Cover 분석 모델, Stem, FFmpeg와 Python 환경을 앱이 함께 설치합니다. 개별 패키지를 고르거나 런타임 경로를 입력할 필요가 없습니다.
-4. 스타일 프리셋을 고르고 가사를 입력하거나 AI 작사를 사용합니다. Instrumental을 켜면 가사는 필요하지 않습니다.
-5. 1~4곡을 생성합니다. 작업은 순차 처리하며 각 곡에 서로 다른 Seed를 저장합니다.
-6. 결과를 재생하고 곡 메뉴에서 Cover, Stem 추출, 앨범아트 생성, 내보내기를 사용합니다.
+1. **환경설정**에서 감지한 GPU·VRAM과 추천 음악 모델 구성(Music·VAE·Cover·Backend·Stem)을 확인하고 **자동 설치**를 누릅니다. 직접 고르려면 모델 콤보박스에서 YuE2 구성 하나를 선택합니다. 필요한 실행 엔진, Cover 분석 모델, Stem 분리 모델, FFmpeg, Python 환경을 앱이 함께 설치합니다.
+2. **Project**를 만들고 스타일 프리셋을 고른 뒤 가사를 입력하거나 AI 작사를 사용합니다. Instrumental을 켜면 가사가 필요 없습니다.
+3. 1~4곡을 생성합니다. 결과를 재생하고 곡 메뉴에서 Cover, Stem 추출, 앨범아트, 내보내기를 사용합니다.
 
 음원 가져오기·재생·Project 관리에는 음악 모델이 필요하지 않습니다.
 
-## 선택 가능한 음악 모델
+## 음악 모델
 
-실제 공개된 YuE2 3B GGUF 파일을 기준으로 네 구성을 제공합니다.
-
-| 모델 구성 | 현재 앱의 통합 설치 VRAM 기준 | 설치 여유 공간 기준 |
+| 구성 | VRAM 기준 | 여유 공간 기준 |
 |---|---:|---:|
 | YuE2 3B · BF16 | 12GB 이상 | 39GB 이상 |
 | YuE2 3B · Q8_0 | 8GB 이상 | 36GB 이상 |
 | YuE2 3B · Q6_K | 7GB 이상 | 35GB 이상 |
 | YuE2 3B · Q5_K_M | 6GB 이상 | 35GB 이상 |
 
-이 값은 **앱의 설치 선택 정책**이며 실제 속도·품질·최대 메모리 사용량을 보장하지 않습니다. 모든 구성은 현재 Windows NVIDIA GPU, RAM 16GB 이상을 대상으로 합니다. 드라이버 조건과 실제 여유 공간도 확인합니다. 설치할 수 없는 구성도 목록에 표시하고 구체적인 사유를 안내합니다. 비 NVIDIA PC에 맞는 전체 동반 패키지는 아직 지원 완료로 표시하지 않습니다.
+설치할 수 없는 구성도 목록에 표시하고 이유를 안내합니다. 모든 엔진·모델·다운로드 캐시는 프로젝트의 `engine-packages` 폴더에 설치되며 저장소에는 포함되지 않습니다.
 
-설치기는 음악 모델 선택 후 실행됩니다. 검증된 공통 파일과 완료된 동반 설치는 재사용합니다. 다운로드는 실제 전송량이 있는 경우 진행률을 표시하고, 총량이 없는 설치·생성 단계에는 현재 작업과 경과시간을 표시합니다. 취소·다운로드 실패·디스크 부족을 성공으로 처리하지 않습니다.
+## 주요 기능
 
-## AI 작사와 앨범아트
+- **음악 가져오기**: 로컬 파일과 YouTube URL(단일 영상)에서 오디오를 가져와 WAV 또는 MP3 320kbps로 저장합니다.
+- **Stem 분리**: BS-RoFormer로 Vocal/Instrumental을 분리합니다.
+- **AI 작사**: Claude Code 또는 Codex CLI가 작사합니다. 둘 다 설치되어 있으면 처음 한 번 사용할 에이전트를 고릅니다.
+- **앨범아트**: 환경설정 › 앨범아트 이미지에서 이미지 생성 엔진을 고릅니다.
+  - 에이전트: Codex의 이미지 도구로 생성합니다.
+  - 로컬 모델: AI 에이전트가 설명문을 쓰고 로컬 모델(Z-Image Turbo 또는 FLUX.2 klein 4B, stable-diffusion.cpp)이 그립니다. 설치 창에서 PC 사양에 맞는 모델을 추천합니다.
+- **가사 영상**: 플레이리스트로 가사 영상을 만듭니다. 가사 시간은 자동으로 맞추고, 불확실한 줄만 음악을 들으며 확인합니다. LRC/SRT 파일을 올려 가사 시간을 바로 적용할 수도 있습니다. 영상 템플릿을 추가하는 방법은 [video-templates/README.md](video-templates/README.md)를 참고하세요.
 
-로그인된 로컬 **Claude Code CLI** 또는 **Codex CLI**를 사용합니다. AI 요청은 연결된 계정의 서비스로 전송될 수 있으므로 로컬 CLI 실행이 오프라인 추론을 뜻하지는 않습니다.
+## 사용 엔진과 모델
 
-- 시작 시 두 CLI의 설치 여부를 확인합니다. 하나만 설치되어 있으면 그 에이전트로 바로 시작하고, 둘 다 설치되어 있고 아직 선택하지 않았다면 기본 에이전트 선택 창을 한 번 표시합니다. 선택은 환경설정 › AI 에이전트에서 바꿀 수 있습니다.
-- **Codex**: 모델 목록과 지원 추론 수준을 CLI에서 조회합니다(작사·이미지 지시 모델 각각 선택).
-- **Claude Code**: CLI가 지원하는 모델 별칭(Fable·Opus·Sonnet·Haiku 또는 CLI 기본 모델)과 추론 수준(보통·높음·매우 높음·최대)을 선택합니다. `claude -p --safe-mode --tools ""`로 실행해 사용자 CLAUDE.md·훅·MCP·도구를 사용하지 않습니다. 사용량은 CLI 내장 `/usage` 명령(모델 호출 없음)으로 시작 시·5분마다·배지 클릭 시 갱신하며, 5시간 잔량을 표시하고(없으면 주간 잔량), 주간·모델별 한도는 툴팁에 표시합니다.
-- **CLI 전용·구독 전용**: 외부 유료 API를 직접 호출하지 않습니다. 앱 시작 시 `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY`, `OPENAI_API_KEY`, `CODEX_API_KEY`를 앱 프로세스에서 제거해 어떤 CLI에도 전달하지 않습니다. 실행 직전마다 Claude는 `claude auth status`가 구독 로그인(`claude.ai`, 1st party, API 키 없음)인지, Codex는 `codex login status`가 ChatGPT 로그인이고 기본 `model_provider`가 OpenAI인지 확인하며, 아니면 사유를 표시하고 사용하지 않습니다. Claude 실행 중 API 키 인증이 감지되면 즉시 중단합니다.
-- Claude는 이미지를 직접 생성하지 않습니다. Claude로 작사할 때 앨범아트는 설치된 Codex로 생성하며, Codex가 없으면 이미지 모델 선택과 앨범아트 기능을 비활성화합니다. 로컬 이미지 생성 모델은 이후 추가 예정입니다.
-- 실행파일은 자동 탐색합니다. 필요하면 `BOKS_CLAUDE_PATH`, `BOKS_CODEX_PATH`로 절대 경로를 지정할 수 있습니다.
+모두 앱의 설치 화면에서 검증된 사전 빌드본과 모델 파일(크기·SHA-256 고정)을 `engine-packages`에 내려받습니다.
 
-이미지 생성 도구가 연결된 경우에만 실제 앨범아트를 생성합니다. 생성 파일을 검증하며 설명문이나 가짜 이미지를 결과로 등록하지 않습니다. 앱에 별도 API 키를 저장하지 않습니다.
+| 역할 | Windows | macOS Apple Silicon |
+|---|---|---|
+| 음악 생성 · Instrumental | yue2.cpp (CUDA, [YuE2-Studio](https://github.com/timoncool/YuE2-Studio) 배포본) + YuE2 3B GGUF · VAE | [audio.cpp](https://github.com/0xShug0/audio.cpp) (Metal) + YuE2 3B GGUF · VAE |
+| Cover 분석 | SheetSage2 GGUF | SheetSage2 GGUF |
+| Vocal/Instrumental · 멀티트랙 Stem | BS-RoFormer ([python-audio-separator](https://github.com/nomadkaraoke/python-audio-separator), CUDA) | BS-RoFormer (MPS) |
+| 가사 시간 정렬 | Qwen3-ASR-1.7B · Qwen3-ForcedAligner-0.6B + 가사 기반 onset 추정 | 동일 |
+| 앨범아트(로컬) | [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) (CUDA / Vulkan / CPU) + Z-Image Turbo · FLUX.2 klein 4B GGUF | stable-diffusion.cpp (Metal) |
+| 가사 영상 렌더링 | HyperFrames(HTML 템플릿) · 내장 Canvas 장면(GPU) + FFmpeg | 동일 |
+| YouTube 가져오기 | yt-dlp + FFmpeg | 동일 |
+| AI 작사 · 앨범아트 설명문 | Claude Code CLI / Codex CLI (구독 로그인) | 동일 |
 
-## 저장과 복구
+## 소스 구성
 
-- 모든 모델·엔진 패키지·Python·다운로드 캐시는 프로젝트 `engine-packages`에 설치합니다.
-- 사용자 데이터 폴더의 `library.json`에 목록·설정·작업 상태를 저장하고 이전 저장본은 `library.json.bak`에 보존합니다.
-- Project 저장 폴더는 UUID로 구분하므로 한글 제목을 사용할 수 있습니다.
-- 저장 위치 변경은 기존 파일을 자동 이동하지 않습니다. Project 위치는 이후 만드는 Project에 적용됩니다.
-- 강제 종료된 작업은 재실행 시 중단 상태로 복구합니다. 자동 재생성하지 않습니다.
-- 곡 삭제는 휴지통으로 이동합니다. 휴지통에서는 재생·복원·선택 영구 삭제를 제공하며, 영구 삭제 시 해당 곡의 관리 파일을 정리합니다.
-- 오류는 한국어로 표시하고 상세 진단은 `details.log`에 남깁니다.
+| 경로 | 내용 |
+|---|---|
+| `electron/` | 메인 프로세스: 작업 대기열, 엔진 설치·실행, 에이전트 연동, 가사 정렬·영상 제작, 저장소 |
+| `src/` | 렌더러(React + TypeScript): 화면과 컴포넌트, 스타일 |
+| `engines/` | Python 엔진 스크립트(Stem 분리, 가사 정렬)와 모델 카탈로그 |
+| `video-templates/` | 가사 영상 템플릿(HTML/CSS) |
+| `assets/` | 앱 아이콘 |
+| `tests/` | 자동 테스트(`npm test`) |
+| `scripts/` | 개발 실행(`dev.mjs`), 아이콘 생성, 스모크 테스트 |
 
-## 검증 범위
+## AI 에이전트와 과금
 
-타입 검사, 자동 테스트 28개, 개발 모드 UI 검사와 실제 통합 검사 15개를 통과했습니다. 모델 설치·CUDA 로딩·음악 생성·재생·내보내기·복구·다중 생성·취소를 확인하고 서브에이전트가 출력 파일과 로그를 독립 검증했습니다. 생성 작업 종료 후 추론 프로세스가 남지 않는 것도 확인했습니다. **Instrumental 무보컬, Cover 멜로디 유사성, Stem 누출과 주관적 음질은 청취 검증 전입니다.** 다른 GPU의 실행 성능까지 검증한 것은 아닙니다.
+- 에이전트는 로컬 CLI의 **구독 로그인**으로만 실행하며 외부 유료 API를 직접 호출하지 않습니다.
+- 앱은 `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `CODEX_API_KEY` 같은 API 키·클라우드 제공자 변수를 하위 프로세스에 전달하지 않습니다. 실행할 때마다 구독 인증인지 확인하고, API 키 인증이면 사용하지 않습니다.
+- CLI 실행 파일은 자동으로 찾습니다. 필요하면 `BOKS_CLAUDE_PATH`, `BOKS_CODEX_PATH`에 절대 경로를 지정합니다.
+- AI 요청은 연결된 계정의 서비스로 전송됩니다. 로컬 CLI 실행이 오프라인 추론을 뜻하지는 않습니다.
 
-자세한 내용: [설치 구조](engines/README.md), [엔진 조사](docs/ENGINE_RESEARCH.md), [Windows 음악 엔진](docs/WINDOWS_BACKENDS.md), [검증 기록](docs/VALIDATION.md).
+## 데이터 저장
 
-보이스 등록·변환 기능은 2026-10-07 사용자 요청으로 제거했습니다. 기존 생성 음원과 녹음 파일은 보존하며, 음악 생성과 Vocal/Instrumental 및 Multi-track Stem 분리는 계속 지원합니다.
-
-## 음악 가져오기와 일괄 관리 (2026-10-07)
-
-- 상단 **음악 가져오기**에서 저장할 프로젝트와 **파일 / YouTube URL**을 선택합니다. 파일은 원본을 보존하고 프로젝트 관리 폴더에 복사합니다.
-- YouTube는 단일 영상의 오디오를 추출한 뒤 **WAV / MP3 320 kbps** 저장 형식을 선택합니다. 도구는 프로젝트 `engine-packages/tools`에 검증된 바이너리로 설치합니다. 다운로드는 실제 바이트 진행률, 변환은 처리시간 진행률을 표시합니다. 사이트 제한이나 삭제된 영상은 실패 이유를 표시합니다. [YouTube 검증 및 구현](docs/YOUTUBE_IMPORT.md).
-- 가져온 곡은 **가져온 음악**과 해당 **프로젝트** 양쪽에서 볼 수 있습니다. 전용 목록은 가로 카드이며, 프로젝트 카드에는 가져온 음악 배지를 표시합니다.
-- 모든 음악·프로젝트·가져온 음악에서 개별/전체 선택 후 프로젝트 이동 또는 휴지통 이동이 가능합니다. 프로젝트 이동은 곡과 연결 Stem의 소속을 변경하며 실제 파일 위치를 유지합니다. 저장 소유권을 별도로 추적하여 이동 후에도 재생·추가 Stem/앨범아트 생성·영구 삭제가 동작합니다.
-- 생성 또는 가져온 날짜·시간을 표시하고, 왼쪽 Projects 목록을 접거나 펼칠 수 있습니다.
+- 목록·설정·작업 상태는 사용자 데이터 폴더의 `library.json`에 저장하고, 이전 저장본은 `library.json.bak`에 보존합니다.
+- Project 파일은 환경설정에서 지정한 저장 위치에 저장합니다. 위치를 바꾸면 이후 만드는 Project부터 적용됩니다.
+- 곡을 삭제하면 휴지통으로 이동합니다. 휴지통에서 복원하거나 영구 삭제할 수 있습니다.
+- 강제 종료된 작업은 다음 실행 때 중단 상태로 복구하며 자동으로 다시 실행하지 않습니다.
