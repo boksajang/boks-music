@@ -1,0 +1,117 @@
+{
+  "cuda": {
+    "minDriverMajor": 580,
+    "files": [
+      "cublas64_13.dll",
+      "cublasLt64_13.dll"
+    ],
+    "url": "https://developer.download.nvidia.com/compute/cuda/redist/libcublas/windows-x86_64/libcublas-windows-x86_64-13.5.1.27-archive.zip",
+    "bytes": 391055517,
+    "sha256": "c946e1c825e05895747a95ed4fee18030b08052c09783b9b7b19818fd2e31f58",
+    "backendSubdir": "cuda13"
+  },
+  "modelRevision": "64b030e3deb6e8150d2b7c0db641ef5a17eca8a3",
+  "profiles": [
+    {
+      "verifiedOnThisPC": false,
+      "id": "native-quality",
+      "backbone": "YuE2-3B-Q8_0.gguf",
+      "suggestedVramGiB": 8,
+      "vae": "YuE2-Vae-F32.gguf",
+      "transcriber": "SheetSage2-Q8_0.gguf"
+    },
+    {
+      "verifiedOnThisPC": false,
+      "id": "native-full",
+      "backbone": "YuE2-3B-BF16.gguf",
+      "suggestedVramGiB": 12,
+      "vae": "YuE2-Vae-F32.gguf",
+      "transcriber": "SheetSage2-F32.gguf"
+    }
+  ],
+  "runtime": {
+    "url": "https://github.com/timoncool/YuE2-Studio/releases/download/v3.4.0/YuE2-Studio-3.4.0-portable-windows-x64.zip",
+    "bytes": 349102327,
+    "archiveSubdir": "resources/yue2-cpp",
+    "sha256": "3aa7859346605a63f859edf56db8f6d1047588edd9d0c40fe39cb746f0bdfb71",
+    "license": "MIT",
+    "executable": "yue-server.exe"
+  },
+  "checkedAt": "2026-10-06",
+  "sourceCommit": "1141479c725b803a3649c900fd3e6fcb27f6f595",
+  "platform": "win32",
+  "models": [
+    {
+      "id": "SheetSage2-F32.gguf",
+      "url": "https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/SheetSage2-F32.gguf",
+      "bytes": 2708176640,
+      "role": "transcriber",
+      "sha256": "f324d213e78a1522bbc56ebb819584af11a34336ab55084b1d8145f1bcf15e58",
+      "filename": "SheetSage2-F32.gguf"
+    },
+    {
+      "id": "SheetSage2-Q5_K_M.gguf",
+      "url": "https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/SheetSage2-Q5_K_M.gguf",
+      "bytes": 737104280,
+      "role": "transcriber",
+      "sha256": "165e7b5f4d8c7954473b44481cf2d1ecc96f73e3690d9561390614dd3a7bcc03",
+      "filename": "SheetSage2-Q5_K_M.gguf"
+    },
+    {
+      "id": "SheetSage2-Q6_K.gguf",
+      "url": "https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/SheetSage2-Q6_K.gguf",
+      "bytes": 813864856,
+      "role": "transcriber",
+      "sha256": "9e9d7868bd96dbf016fcc4e484db38385c8863a94bbc0f6ed37455b4e410c7e0",
+      "filename": "SheetSage2-Q6_K.gguf"
+    },
+    {
+      "id": "SheetSage2-Q8_0.gguf",
+      "url": "https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/SheetSage2-Q8_0.gguf",
+      "bytes": 957571488,
+      "role": "transcriber",
+      "sha256": "4507d8c1d9245f312c0894ea610ab18fbcbf31443764b5bd6a60e4b6df59e973",
+      "filename": "SheetSage2-Q8_0.gguf"
+    },
+    {
+      "id": "YuE2-3B-BF16.gguf",
+      "url": "https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/YuE2-3B-BF16.gguf",
+      "bytes": 7166072352,
+      "role": "backbone",
+      "sha256": "668ca9ffa4622449916aae5068b5737363e7ec186a824cd3d7a1a8a95269f166",
+      "filename": "YuE2-3B-BF16.gguf"
+    },
+    {
+      "id": "YuE2-3B-Q5_K_M.gguf",
+      "url": "https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/YuE2-3B-Q5_K_M.gguf",
+      "bytes": 2622936832,
+      "role": "backbone",
+      "sha256": "cd3efd250b734a229172800f08f33a893ad1f66b521666e176cdae4a0729b281",
+      "filename": "YuE2-3B-Q5_K_M.gguf"
+    },
+    {
+      "id": "YuE2-3B-Q6_K.gguf",
+      "url": "https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/YuE2-3B-Q6_K.gguf",
+      "bytes": 2943331072,
+      "role": "backbone",
+      "sha256": "42068d5e57713df11b9f6a5a3751072d9bbefe231d1d088f9c100e026ffa4ef9",
+      "filename": "YuE2-3B-Q6_K.gguf"
+    },
+    {
+      "id": "YuE2-3B-Q8_0.gguf",
+      "url": "https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/YuE2-3B-Q8_0.gguf",
+      "bytes": 3810232064,
+      "role": "backbone",
+      "sha256": "41121ce97786d7795a325bcf123ca196956c03bb252c9e75384cfc1f2fc19e6b",
+      "filename": "YuE2-3B-Q8_0.gguf"
+    },
+    {
+      "id": "YuE2-Vae-F32.gguf",
+      "url": "https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/YuE2-Vae-F32.gguf",
+      "bytes": 530497344,
+      "role": "vae",
+      "sha256": "93e49dfb1970e89ad64cacb17cf13b5d05f6bb30ef7ed3adae3050bcb728638a",
+      "filename": "YuE2-Vae-F32.gguf"
+    }
+  ]
+}

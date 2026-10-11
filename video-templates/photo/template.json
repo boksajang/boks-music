@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "photo",
+  "name": "포토 저널",
+  "description": "사진과 가사가 나란히 이어지는 장면",
+  "order": 2,
+  "requiresBackground": true,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "round-bars",
+    "mirror",
+    "blocks",
+    "dots",
+    "reflection",
+    "wave",
+    "double-wave",
+    "area",
+    "mirror-area",
+    "ribbon"
+  ],
+  "recommendedSpectrum": "bars",
+  "stylesheet": "theme.css"
+}

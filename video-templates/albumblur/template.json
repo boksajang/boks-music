@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "albumblur",
+  "name": "미드나이트 에디토리얼",
+  "description": "넓은 여백과 푸른 빛, 천천히 흐르는 가사",
+  "order": 1,
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "round-bars",
+    "mirror",
+    "blocks",
+    "dots",
+    "reflection",
+    "wave",
+    "double-wave",
+    "area",
+    "mirror-area",
+    "ribbon"
+  ],
+  "recommendedSpectrum": "wave",
+  "stylesheet": "theme.css"
+}

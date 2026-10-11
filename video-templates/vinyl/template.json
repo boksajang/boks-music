@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "vinyl",
+  "name": "오비트 라운지",
+  "description": "앨범을 감싸는 원형 스펙트럼",
+  "order": 3,
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "ring",
+    "radial-bars",
+    "double-ring",
+    "radial-dots"
+  ],
+  "recommendedSpectrum": "ring",
+  "stylesheet": "theme.css"
+}

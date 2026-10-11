@@ -1,0 +1,686 @@
+import {LyricTimingReview} from './LyricTimingEditor';
+import {VideoLibrary, videoWork} from './VideoLibrary';
+import {LrcBadge} from './LrcBadge';
+import {ImageModelLayer} from './ImageModelLayer';
+import {VideoMaker} from './VideoMaker';
+import { createPlaybackQueue, currentQueueId, stepPlaybackQueue, selectQueueTrack, setQueueShuffle, retainQueueTracks, type PlaybackQueue } from './playback-queue.mjs';
+import {StemWaveform} from './StemWaveform';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import brandIcon from '../assets/icon.svg';
+import { inspectYue2Input } from '../electron/yue2-input.mjs';
+import homeBrandIcon from '../assets/icon-blue.svg';
+
+type Row = Record<string, any>;
+type CodexStatus = { state: 'checking' | 'installed' | 'missing' | 'error'; version?: string; message?: string };
+type CodexUsage = { state: 'checking' | 'ready' | 'unavailable'; usedPercent?: number; resetsAt?: number; message?: string };
+type AgentId = 'codex' | 'claude';
+type AgentAccess = { usable?: boolean; billing?: 'subscription' | 'metered' | 'none' | 'unknown'; message?: string };
+type ClaudeStatus = CodexStatus & AgentAccess & { loggedIn?: boolean | null; plan?: string };
+type ClaudeUsage = CodexUsage & { sessionPercent?: number; sessionResetsAt?: number; observedAt?: number; models?: { label: string; percent: number; resetsAt?: number }[] };
+type Agents = { installed: Record<AgentId, boolean>; available: Record<AgentId, boolean>; checking: boolean; active: AgentId | ''; needsChoice: boolean; imageAgent: AgentId | ''; imageReason: string; reason: string };
+type Snapshot = { videoInstallation?: Row; lyricInstallation?: Row; codexStatus?: CodexStatus; codexUsage?: CodexUsage; codexAccess?: AgentAccess & { state?: string }; claudeStatus?: ClaudeStatus; claudeUsage?: ClaudeUsage; claudeModels?: Row[]; agents?: Agents; host?: { platform: string; arch: string }; videos?: Row[]; localImage?: Row; projects: Row[]; playlists?: Row[]; tracks: Row[]; trash?: Row[]; presets: Row[]; jobs: Row[]; settings: Row; system: Row; engines: Row[]; codexModels: Row[]; installOptions: Row[]; installedEngines: Row[]; installationRecommendation?: Row; codexError?: string };
+const empty: Snapshot = { projects: [], tracks: [], presets: [], jobs: [], settings: {}, system: {}, engines: [], codexModels: [], installOptions: [], installedEngines: [] };
+const agentName = (id: string) => id === 'claude' ? 'Claude Code' : 'Codex';
+// Playlist rows describe what a song is with short badges instead of the long style prompt.
+// Plain originals carry no kind badge; "원곡" already labels a Cover's source song.
+// A mastered song keeps what it was made from (originKind), e.g. 커버 + 마스터링.
+// Vocabulary shared by the colored badges: 커버 · 마스터링 · 가져온 음악 · 보컬곡 · 연주곡
+// (the artwork kind labels such as COVER/INSTRUMENTAL stay as they are).
+const trackBadges = (track: Row) => {
+  const origin = track.kind === 'mastered' ? track.originKind : isImportedAudio(track) ? 'import' : track.kind;
+  return [
+    ...(origin === 'cover' ? [{ label: '커버', tone: 'cover-badge' }] : origin === 'import' ? [{ label: '가져온 음악', tone: 'imported-badge' }] : []),
+    ...(track.kind === 'mastered' ? [{ label: '마스터링', tone: 'mastered-badge' }] : []),
+    ...(origin === 'import' ? [] : [track.instrumental ? { label: '연주곡', tone: 'instrumental-badge' } : { label: '보컬곡', tone: 'vocal-badge' }]),
+  ];
+};
+const masteringDefaults = { targetLufs: -10, truePeak: -1, character: 'balanced' };
+const systemLabels: Record<string, string> = { os: '운영체제', cpu: 'CPU', ram: '메모리', gpu: 'GPU', gpuVendor: 'GPU 제조사', vram: 'VRAM', vramMB: 'VRAM(MB)', cuda: 'CUDA', driver: '드라이버', computeCapability: 'Compute Capability', bf16: 'BF16', platform: '플랫폼', arch: '아키텍처', runtimeKey: '런타임', nativeBackend: '네이티브 백엔드', stemDevice: 'Stem 장치', freeSpace: '여유 공간', disk: '저장 공간', macOSVersion: 'macOS 버전', unifiedMemoryGB: '통합 메모리', translated: 'Rosetta 실행' };
+const isImportedAudio = (track: Row) => track.source === 'import' || (track.kind === 'original' && ['가져온 오디오', '가져온 음악'].includes(track.style));
+const trackDate = (track: Row) => { const value = new Date(track.importedAt || track.createdAt || ''); return Number.isFinite(value.getTime()) ? value.toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '날짜 정보 없음'; };
+const newestMusicFirst = (a: Row, b: Row) => (Date.parse(b.importedAt || b.createdAt || '') || 0) - (Date.parse(a.importedAt || a.createdAt || '') || 0);
+const durationChoice = (value: unknown) => [120, 180, 240, 300].includes(Number(value)) ? Number(value) : 180;
+const time = (seconds = 0) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+const jobStageLabel = (stage?: string) => (stage || '')
+  .replace(/음악 토큰 생성 중/g, '음악 생성 중')
+  .replace(/악보 생성 중/g, '악보 구성 중')
+  .replace(/오디오 디코딩 중/g, '음원 변환 중')
+  .replace(/Step (\d+) \/ (\d+)/g, '$1 / $2단계');
+function Icon({ name, size = 20 }: { name: string; size?: number }) {
+  const paths: Record<string, string> = { download: 'M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4', trash: 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7', home: 'm3 11 9-8 9 8M5 10v11h5v-7h4v7h5V10', copy: 'M9 9h12v12H9zM15 5V3H3v12h2', music: 'M9 18V5l12-2v13M9 8l12-2M9 18c0 2-6 4-6 1s6-4 6-1Zm12-2c0 2-6 4-6 1s6-4 6-1Z', plus: 'M12 5v14M5 12h14', grid: 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z', settings: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1Z', arrow: 'M5 12h14M13 6l6 6-6 6', play: 'm8 5 11 7-11 7Z', pause: 'M8 5v14M16 5v14', upload: 'M12 16V3M7 8l5-5 5 5M4 16v5h16v-5', folder: 'M3 6h7l2 3h9v12H3Z', sparkle: 'm12 2 3 7 7 3-7 3-3 7-3-7-7-3 7-3Z', close: 'm6 6 12 12M18 6 6 18', volume: 'M3 9h4l5-4v14l-5-4H3ZM16 8a6 6 0 0 1 0 8M19 5a10 10 0 0 1 0 14', queue: 'M4 6h16M4 12h10M4 18h10M18 12l4 3-4 3Z', check: 'm5 12 4 4L19 6', video: 'M3 6h13v12H3ZM16 10l5-3v10l-5-3' };
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill={name === 'play' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name] || paths.music} /></svg>;
+}
+// A choice layer: pick one row (playlist, project) or create a new one by name.
+type Choice = { id: string; icon: string; label: string; detail: string; note?: string };
+function ChoiceLayer({ eyebrow, title, description, items, empty, createLabel, createPlaceholder, name, setName, busy, choose, create, close }: { eyebrow: string; title: string; description: string; items: Choice[]; empty: string; createLabel: string; createPlaceholder: string; name: string; setName: (value: string) => void; busy: boolean; choose: (id: string) => void; create: () => void; close: () => void }) {
+  return <div className="modal-backdrop" onClick={() => !busy && close()}><section className="modal choice-layer" role="dialog" aria-modal="true" aria-labelledby="choice-layer-heading" onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Escape' && !busy) close(); }}>
+    <div className="modal-title"><div><span className="eyebrow">{eyebrow}</span><h2 id="choice-layer-heading">{title}</h2></div><button title="닫기" aria-label={`${title} 닫기`} disabled={busy} onClick={close}><Icon name="close" /></button></div>
+    <p className="choice-description">{description}</p>
+    {items.length ? <div className="choice-list">{items.map(item => <button key={item.id} className="choice-row" disabled={busy || !!item.note} onClick={() => choose(item.id)}><Icon name={item.icon} size={18} /><span><strong>{item.label}</strong><small>{item.detail}</small></span>{item.note ? <em>{item.note}</em> : <Icon name="arrow" size={16} />}</button>)}</div> : <p className="choice-empty">{empty}</p>}
+    <form className="choice-create" onSubmit={event => { event.preventDefault(); if (name.trim() && !busy) create(); }}><input aria-label={createPlaceholder} placeholder={createPlaceholder} value={name} maxLength={100} onChange={event => setName(event.target.value)} /><button type="submit" className="secondary" disabled={busy || !name.trim()}><Icon name="plus" size={15} />{createLabel}</button></form>
+  </section></div>;
+}
+function ResizeHandle({ label, controls }: { label: string; controls: string }) {
+  const drag = useRef<{ y: number; height: number } | null>(null);
+  const field = () => document.getElementById(controls) as HTMLTextAreaElement | null;
+  const resize = (height: number) => { const input = field(); if (input) input.style.height = `${Math.max(parseFloat(getComputedStyle(input).minHeight) || 0, height)}px`; };
+  return <div className="field-resize-handle" role="separator" aria-label={label} aria-orientation="horizontal" aria-controls={controls} tabIndex={0} title="드래그하여 높이 조절 · 방향키로도 조절할 수 있습니다" onPointerDown={event => { if (event.button !== 0) return; const input = field(); if (!input) return; event.preventDefault(); drag.current = { y: event.clientY, height: input.getBoundingClientRect().height }; event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={event => { if (drag.current) resize(drag.current.height + event.clientY - drag.current.y); }} onPointerUp={event => { drag.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }} onPointerCancel={() => { drag.current = null; }} onLostPointerCapture={() => { drag.current = null; }} onKeyDown={event => { const input = field(); if (!input || !['ArrowUp', 'ArrowDown', 'Home'].includes(event.key)) return; event.preventDefault(); resize(event.key === 'Home' ? 0 : input.getBoundingClientRect().height + (event.key === 'ArrowDown' ? 20 : -20)); }}><span /></div>;
+}
+function CodexBadge({ status, usage, busy, onRefresh }: { status?: CodexStatus; usage?: CodexUsage; busy: boolean; onRefresh: () => void }) {
+  const state = status?.state || 'checking';
+  const label = { checking: 'CODEX 설치 확인 중', installed: 'CODEX 설치 확인', missing: 'CODEX 미설치', error: 'CODEX 확인 오류' }[state];
+  const usageReady = usage?.state === 'ready' && typeof usage.usedPercent === 'number' && Number.isFinite(usage.usedPercent);
+  const used = usageReady ? Math.max(0, Math.min(100, usage!.usedPercent!)) : null;
+  const remaining = used === null ? null : 100 - used;
+  const formatPercent = (value: number) => value.toLocaleString('ko-KR', { maximumFractionDigits: 1 }) + '%';
+  const usageLabel = remaining !== null ? `주간 잔량 ${formatPercent(remaining)}` : !usage || usage.state === 'checking' ? '주간 확인 중' : '주간 확인 불가';
+  const usageTone = remaining === null ? '' : remaining <= 10 ? 'critical' : remaining <= 25 ? 'low' : '';
+  const reset = typeof usage?.resetsAt === 'number' && Number.isFinite(usage.resetsAt) ? new Date(usage.resetsAt * 1000).toLocaleString('ko-KR') : '';
+  const detail = [label, status?.version ? `버전 ${status.version}` : '', status?.message, usageLabel, usage?.message, reset ? `주간 한도 갱신: ${reset}` : '', '클릭하여 다시 확인'].filter(Boolean).join('\n');
+  return <button className={`codex-badge codex-${state}`} disabled={busy || state === 'checking' || usage?.state === 'checking'} onClick={onRefresh} title={detail} aria-label={`${label}, ${usageLabel}. 다시 확인`}><span className="codex-install-state"><i aria-hidden="true" />{label}</span><span className={`codex-weekly-usage ${usageTone}`} aria-live="polite">{usageLabel}</span></button>;
+}
+// Shares the Codex badge styling. Plan usage comes from the CLI /usage command (no model turn).
+function ClaudeBadge({ status, usage, busy, onRefresh }: { status?: ClaudeStatus; usage?: ClaudeUsage; busy: boolean; onRefresh: () => void }) {
+  const state = status?.state || 'checking';
+  const blocked = state === 'installed' && status?.usable === false;
+  const label = blocked ? status?.billing === 'none' ? 'CLAUDE 로그인 필요' : 'CLAUDE 사용 중지' : { checking: 'CLAUDE 설치 확인 중', installed: 'CLAUDE 설치 확인', missing: 'CLAUDE 미설치', error: 'CLAUDE 확인 오류' }[state];
+  const percent = (value?: number) => usage?.state === 'ready' && typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : null;
+  const week = percent(usage?.usedPercent), session = percent(usage?.sessionPercent);
+  // The five-hour window is the limit users hit first; the weekly figure stands in when it is missing.
+  const shown = session ?? week;
+  const remaining = shown === null ? null : 100 - shown;
+  const formatPercent = (value: number) => value.toLocaleString('ko-KR', { maximumFractionDigits: 1 }) + '%';
+  const usageLabel = remaining !== null ? `${session !== null ? '5시간' : '주간'} 잔량 ${formatPercent(remaining)}` : blocked ? '사용 불가' : !usage || usage.state === 'checking' ? '사용량 확인 중' : '사용량 확인 불가';
+  const usageTone = remaining === null ? '' : remaining <= 10 ? 'critical' : remaining <= 25 ? 'low' : '';
+  const when = (seconds?: number) => typeof seconds === 'number' && Number.isFinite(seconds) ? new Date(seconds * 1000).toLocaleString('ko-KR') : '';
+  const windowLine = (name: string, used: number | null, reset?: number) => used === null ? '' : `${name} 사용 ${formatPercent(used)}${when(reset) ? ` · ${when(reset)} 초기화` : ''}`;
+  const detail = [label, status?.version ? `버전 ${status.version}` : '', status?.plan ? `플랜 ${status.plan}` : '', state !== 'installed' || blocked ? status?.message : '',
+    windowLine('주간(전체 모델)', week, usage?.resetsAt), windowLine('5시간', session, usage?.sessionResetsAt), ...(usage?.models || []).map(model => windowLine(`주간(${model.label})`, percent(model.percent), model.resetsAt)),
+    !blocked && usage?.message ? usage.message : '', usage?.observedAt ? `확인 시각: ${new Date(usage.observedAt).toLocaleString('ko-KR')}` : '', '클릭하여 다시 확인'].filter(Boolean).join('\n');
+  return <button className={`codex-badge codex-${blocked ? 'error' : state}`} disabled={busy || state === 'checking'} onClick={onRefresh} title={detail} aria-label={`${label}, ${usageLabel}. 다시 확인`}><span className="codex-install-state"><i aria-hidden="true" />{label}</span>{state === 'installed' && <span className={`codex-weekly-usage ${usageTone}`} aria-live="polite">{usageLabel}</span>}</button>;
+}
+function Artwork({ track, small = false }: { track?: Row; small?: boolean }) { return <div className={`artwork ${small ? 'small' : ''}`} style={{ '--art-hue': `${Array.from(String(track?.id || '')).reduce((s, c) => s + c.charCodeAt(0), 0) % 160}deg` } as React.CSSProperties}>{track?.artUrl ? <img src={track.artUrl} alt={`${track.title} 앨범아트`} /> : <><span className="art-orbit" /><Icon name="music" size={small ? 23 : 44} /></>}</div>; }
+function InstallOptions({ options, installedEngines, recommendation, autoInstall, rescan, draft, setDraft, busy, install }: { options: Row[]; installedEngines: Row[]; recommendation?: Row; autoInstall: () => void; rescan: () => void; draft: Row; setDraft: (v: Row) => void; busy: string; install: (id: string) => void }) {
+  const [selectedModelId, setSelectedModelId] = useState('');
+  const selectedModel = options.find(option => option.id === selectedModelId) || options.find(option => option.active) || options.find(option => option.recommended || option.candidateRecommended) || options[0];
+  return <section className="settings-panel wide install-panel"><h2>음악 엔진 설치</h2><p>PC 사양에 맞는 YuE2 모델을 선택하세요. 운영체제와 가속기 지원을 확인한 뒤 설치 가능한 구성을 안내합니다. 각 구성요소의 준비 상태는 아래에서 확인할 수 있습니다.</p>
+    {recommendation && <section className="auto-install-preview"><div className="auto-install-heading"><div><span className="eyebrow">RECOMMENDED FOR YOUR PC</span><h3>현재 PC 사양에 맞는 추천 구성</h3></div><span className="pill">{recommendation.available ? '추천 구성' : '후보 구성 · 설치 불가'}</span></div><p className="detected-hardware">{typeof recommendation.hardware === 'string' ? recommendation.hardware : Object.values(recommendation.hardware || {}).join(' · ')}</p><dl className="recommendation-items">{(recommendation.items || []).map((item: Row) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl><p className="field-help">{recommendation.explanation}</p>{recommendation.reason && <p className={recommendation.available ? 'field-help' : 'job-error'}>{recommendation.reason}</p>}<div className="auto-install-actions"><button className="primary" disabled={!!busy || !recommendation.available || recommendation.installed} onClick={autoInstall}>{recommendation.installed ? '설치 완료' : '자동 설치'} <Icon name="arrow" size={16} /></button><button className="secondary" disabled={!!busy} title="GPU·메모리·저장 공간을 다시 확인하고 추천 구성을 갱신합니다" onClick={rescan}>{busy === 'system' ? '사양 확인 중…' : '시스템 재검사'}</button></div></section>}
+    <label className="field-label" htmlFor="model-selection">YuE2 모델 · 파라미터 / 정밀도</label><select id="model-selection" value={selectedModel?.id || ''} onChange={e => setSelectedModelId(e.target.value)}>{!options.length && <option value="">모델 목록 확인 중</option>}{options.map(option => <option key={option.id} value={option.id}>{option.name}{option.active ? ' · 사용 중' : option.recommended ? ' · 이 PC에 추천' : ''}</option>)}</select>
+    {selectedModel && <div className={`model-selection-status ${selectedModel.supported ? 'supported' : 'unsupported'}`} role="status"><strong>{selectedModel.supported ? selectedModel.status === 'installed' ? selectedModel.active ? '사용 중인 모델' : '설치 완료' : selectedModel.status === 'repair-needed' ? '복구 설치 필요' : '설치 가능' : '설치 불가'}</strong><p>{selectedModel.reason}</p><p>{selectedModel.description}</p>{selectedModel.experimental && <p>실제 생성 품질과 안정성은 검증 전입니다.</p>}<small>필요 저장 공간: 약 {selectedModel.requiredDiskGB} GB</small></div>}
+    <button className="primary model-install-button" disabled={!!busy || !selectedModel?.supported || (selectedModel.active && selectedModel.status === 'installed')} onClick={() => selectedModel && install(selectedModel.id)}>{selectedModel?.status === 'installed' ? selectedModel.active ? '사용 중인 모델' : '이 모델 사용' : '선택한 모델과 필수 구성 설치'}</button>
+    <div className="installed-engine-selection"><h3>사용할 엔진</h3><p className="field-help">설치된 엔진 중에서 선택합니다. 엔진이 하나이면 해당 엔진을 자동으로 사용합니다.</p><div className="runtime-paths">{[['music', '음악 생성'], ['cover', 'Cover'], ['stems', 'Stem']].map(([role, label]) => {
+      const entries = installedEngines.filter(engine => engine.role === role);
+      const selected = draft.engineSelection?.[role] || entries[0]?.id || '';
+      const entry = entries.find(engine => engine.id === selected);
+      return <div key={role}><label className="field-label" htmlFor={`engine-${role}`}>{label}</label><select id={`engine-${role}`} value={selected} disabled={entries.length <= 1} onChange={e => setDraft({ ...draft, engineSelection: { ...draft.engineSelection, [role]: e.target.value } })}>{!entries.length && <option value="">YuE2 선택 후 함께 설치</option>}{entries.map(engine => <option key={engine.id} value={engine.id} disabled={!engine.available}>{engine.name}{engine.available ? '' : ' · 준비 필요'}</option>)}</select>{entry?.reason && <p className="field-help">{entry.reason}</p>}</div>;
+    })}</div></div>
+  </section>;
+}
+
+type StemMode = 'two' | 'multi';
+function AgentModelFields({ models, draft, setDraft, roles, footer = true }: { models: Row[]; draft: Row; setDraft: (value: Row) => void; roles?: string[]; footer?: boolean }) {
+  const levels = [['medium','보통'],['high','높음'],['xhigh','매우 높음']];
+  return <>{[['textModel','작사 모델','textReasoning'],['imageModel','이미지 지시 모델','imageReasoning']].filter(([key]) => !roles || roles.includes(key)).map(([key,label,effortKey]) => {
+    const model = models.find(item => (typeof item === 'string' ? item : item.id) === draft[key]);
+    const supported: string[] | undefined = model?.supportedReasoningEfforts;
+    const effort = draft[effortKey] || 'medium';
+    return <div className="agent-model-fields" key={key}><label className="field-label" htmlFor={key}>{label}</label><select id={key} value={draft[key] || ''} onChange={event => { const next = models.find(item => (typeof item === 'string' ? item : item.id) === event.target.value); const allowed: string[] | undefined = next?.supportedReasoningEfforts; setDraft({ ...draft, [key]: event.target.value, [effortKey]: !allowed || allowed.includes('medium') ? 'medium' : levels.find(([id]) => allowed.includes(id))?.[0] || 'medium' }); }}><option value="">CLI 기본 모델</option>{draft[key] && !model && <option value={draft[key]}>{draft[key]} · 저장된 모델</option>}{models.map((item: any) => <option key={typeof item === 'string' ? item : item.id} value={typeof item === 'string' ? item : item.id}>{typeof item === 'string' ? item : item.name || item.id}</option>)}</select><label className="field-label" htmlFor={effortKey}>{label} 추론 수준</label><select id={effortKey} value={effort} onChange={event => setDraft({ ...draft, [effortKey]: event.target.value })}>{levels.map(([value,name]) => <option key={value} value={value} disabled={!!supported && !supported.includes(value)}>{name}{supported && !supported.includes(value) ? ' · 모델 미지원' : ''}</option>)}</select>{supported && <p className="field-help">선택한 모델이 지원하는 추론 수준: {levels.filter(([value]) => supported.includes(value)).map(([,name]) => name).join(', ') || '요청한 세 수준을 지원하지 않습니다.'}</p>}</div>;
+  })}{footer && <p className="field-help">Codex에서 확인한 전체 모델 목록과 지원 추론 수준을 사용합니다. 기본 추론 수준은 보통입니다. 추론 수준이 높을수록 응답에 더 오래 걸릴 수 있습니다.</p>}</>;
+}
+const claudeLevels = [['medium','보통'],['high','높음'],['xhigh','매우 높음'],['max','최대']];
+function AgentSettings({ data, draft, setDraft, busy, refreshModels, installImage }: { data: Snapshot; draft: Row; setDraft: (value: Row) => void; busy: boolean; refreshModels: () => void; installImage: (variantId: string) => Promise<void> }) {
+  const [imageLayer, setImageLayer] = useState(false); const [installingImage, setInstallingImage] = useState('');
+  const agents = data.agents;
+  const installed = agents?.installed || { codex: false, claude: false };
+  const available = agents?.available || installed;
+  const selected: AgentId = available[draft.agentProvider as AgentId] ? draft.agentProvider : agents?.active || 'codex';
+  const status = (id: AgentId) => id === 'claude' ? data.claudeStatus : data.codexStatus;
+  // Installed but not on a subscription login: the CLI exists but is never used for prompts.
+  const access = (id: AgentId): AgentAccess | undefined => id === 'claude' ? data.claudeStatus : data.codexAccess;
+  const blocked = (id: AgentId) => installed[id] && access(id)?.usable === false;
+  const choiceNote = (id: AgentId) => status(id)?.state === 'checking' ? '확인 중' : status(id)?.state === 'error' ? '확인 오류' : !installed[id] ? '미설치' : blocked(id) ? access(id)?.billing === 'none' ? '로그인 필요' : '사용 불가' : '';
+  const codexFields = (note: React.ReactNode, roles?: string[]) => <><button className="text-button refresh-models" disabled={busy} onClick={refreshModels}>모델 목록 새로고침</button>{data.codexError && <p className="job-error">{data.codexError}</p>}{note}<AgentModelFields models={data.codexModels} draft={draft} setDraft={setDraft} roles={roles} /></>;
+  // Album art: image engine (local model / agent) first, then the model, then who writes the description.
+  const local: Row = data.localImage || {}; const localRows: Row[] = (local.families || []).flatMap((family: Row) => family.variants);
+  const installedImages = localRows.filter(row => row.installed), recommendedImage = localRows.find(row => row.id === local.recommendedId);
+  const imageEngine = draft.imageEngine === 'local' ? 'local' : 'agent';
+  const imageJob = data.jobs.find(job => job.type === 'imageInstall' && ['queued', 'running'].includes(job.status));
+  const imageSection = <div className="agent-image-section"><h3>앨범아트 이미지</h3>
+    <label className="field-label" id="image-engine-label">이미지 생성 엔진</label>
+    <div className="agent-switch image-engine-switch" role="radiogroup" aria-labelledby="image-engine-label">{[['local', '로컬 모델', '이 PC', '이 PC에서 로컬 이미지 모델로 그립니다.'], ['agent', '에이전트', 'Codex', 'Codex의 이미지 생성 도구로 만듭니다.']].map(([id, name, hint, title]) => <button key={id} role="radio" aria-checked={imageEngine === id} title={title} className={imageEngine === id ? 'selected' : ''} disabled={busy} onClick={() => setDraft({ ...draft, imageEngine: id })}><strong>{name}</strong><small>{hint}</small></button>)}</div>
+    {imageEngine === 'local' ? <>
+      <label className="field-label" htmlFor="localImageModel">로컬 이미지 모델</label>
+      {installedImages.length ? <div className="image-model-select"><select id="localImageModel" value={installedImages.some(row => row.id === draft.localImageModel) ? draft.localImageModel : ''} disabled={busy} onChange={event => setDraft({ ...draft, localImageModel: event.target.value })}>{!installedImages.some(row => row.id === draft.localImageModel) && <option value="">모델을 선택하세요</option>}{installedImages.map(row => <option key={row.id} value={row.id}>{row.familyName} · {row.quant}</option>)}</select><button className="secondary" disabled={busy} onClick={() => setImageLayer(true)}>모델 관리</button></div>
+        : <div className="image-model-empty"><p>{local.build ? recommendedImage ? <>설치된 로컬 이미지 모델이 없습니다. 이 PC에는 <strong>{recommendedImage.familyName} {recommendedImage.quant}</strong>를 추천합니다.</> : '이 PC에서 설치할 수 있는 로컬 이미지 모델이 없습니다.' : local.reason || '이 PC의 사양을 확인하고 있습니다.'}</p><button className="primary" disabled={busy || !local.build || !!imageJob} onClick={() => setImageLayer(true)}>설치</button></div>}
+      {imageJob && <p className="field-help image-install-status" role="status">{imageJob.title} · {imageJob.stage || '대기 중'}</p>}
+      {selected === 'codex' && available.codex ? <AgentModelFields models={data.codexModels} draft={draft} setDraft={setDraft} roles={['imageModel']} footer={false} /> : <p className="field-help">설명문은 {agentName(selected)} 작사 모델이 쓰고 로컬 모델이 그립니다.</p>}
+    </> : available.codex ? <><p className="field-help">Codex의 이미지 생성 도구로 앨범아트를 만듭니다.</p><AgentModelFields models={data.codexModels} draft={draft} setDraft={setDraft} roles={['imageModel']} footer={false} /></>
+      : <><label className="field-label" htmlFor="imageModel-disabled">이미지 지시 모델</label><select id="imageModel-disabled" disabled value=""><option value="">사용할 수 있는 이미지 생성 에이전트가 없습니다</option></select><p className="field-help">Claude는 이미지를 직접 생성하지 않습니다. 로컬 모델을 선택하거나 Codex를 설치하세요.</p></>}
+    {imageLayer && <ImageModelLayer state={local} busy={busy} installing={installingImage} close={() => setImageLayer(false)} install={variantId => { setInstallingImage(variantId); void installImage(variantId).then(() => setImageLayer(false)).finally(() => setInstallingImage('')); }} />}
+  </div>;
+  return <section className="settings-panel agent-settings"><h2>AI 에이전트</h2>
+    <label className="field-label" id="agent-provider-label">작사 에이전트</label>
+    <div className="agent-switch" role="radiogroup" aria-labelledby="agent-provider-label">{(['claude', 'codex'] as AgentId[]).map(id => <button key={id} role="radio" aria-checked={selected === id} className={selected === id ? 'selected' : ''} disabled={busy || !available[id]} title={available[id] ? `${agentName(id)}로 작사합니다.` : (blocked(id) ? access(id)?.message : status(id)?.message) || `${agentName(id)}가 설치되어 있지 않습니다.`} onClick={() => setDraft({ ...draft, agentProvider: id })}><strong>{agentName(id)}</strong>{choiceNote(id) && <small>{choiceNote(id)}</small>}</button>)}</div>
+    {!agents?.active && agents && !agents.checking && <p className="job-error">{agents.reason}</p>}
+    {(['claude', 'codex'] as AgentId[]).filter(blocked).map(id => <p key={id} className="job-error">{access(id)?.message}</p>)}
+    {selected === 'codex' ? <>{codexFields(<p>로컬 Codex CLI에서 확인한 모델을 사용합니다. 생성 요청은 연결된 클라우드 계정으로 전송될 수 있습니다.</p>, ['textModel'])}{imageSection}</> : <>
+      <p>Claude 구독 계정으로 로그인된 Claude Code CLI로 작사합니다. API 키 인증은 사용하지 않습니다.</p>
+      {data.claudeStatus?.state === 'error' && <p className="job-error">{data.claudeStatus.message}</p>}
+      <div className="agent-model-fields"><label className="field-label" htmlFor="claudeModel">작사 모델</label><select id="claudeModel" value={draft.claudeModel || ''} onChange={event => setDraft({ ...draft, claudeModel: event.target.value })}><option value="">CLI 기본 모델</option>{(data.claudeModels || []).map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select>
+        <label className="field-label" htmlFor="claudeReasoning" title="추론 수준이 높을수록 응답이 느려지고 사용량이 늘어납니다.">작사 모델 추론 수준</label><select id="claudeReasoning" value={draft.claudeReasoning || 'medium'} onChange={event => setDraft({ ...draft, claudeReasoning: event.target.value })}>{claudeLevels.map(([value, name]) => <option key={value} value={value}>{name}</option>)}</select>
+</div>
+      {imageSection}
+    </>}
+  </section>;
+}
+function AgentChoiceDialog({ data, busy, choose }: { data: Snapshot; busy: boolean; choose: (id: AgentId) => void }) {
+  const [selected, setSelected] = useState<AgentId>(data.agents?.active || 'claude');
+  const options: { id: AgentId; status?: ClaudeStatus; points: string[] }[] = [
+    { id: 'claude', status: data.claudeStatus, points: ['AI 작사와 가사 다듬기', '앨범아트는 Codex로 생성'] },
+    { id: 'codex', status: data.codexStatus, points: ['AI 작사와 가사 다듬기', '앨범아트 이미지 생성'] },
+  ];
+  return <div className="modal-backdrop agent-choice-backdrop"><section className="modal agent-choice-modal" role="dialog" aria-modal="true" aria-labelledby="agent-choice-heading" aria-describedby="agent-choice-description"><div className="modal-title"><div><span className="eyebrow">AI AGENT</span><h2 id="agent-choice-heading">기본 AI 에이전트를 선택하세요</h2></div></div>
+    <p id="agent-choice-description">이 PC에서 Claude Code와 Codex를 모두 찾았습니다. 선택한 에이전트가 작사와 환경설정의 모델 선택에 사용됩니다.</p>
+    <div className="agent-choice-options" role="radiogroup" aria-label="기본 AI 에이전트">{options.map(option => <button key={option.id} role="radio" aria-checked={selected === option.id} className={selected === option.id ? 'selected' : ''} disabled={busy} onClick={() => setSelected(option.id)}><span className="agent-choice-radio" aria-hidden="true" /><div><strong>{agentName(option.id)}</strong><small>{[option.status?.version ? `버전 ${option.status.version.replace(/^codex-cli\s*/i, '')}` : '', option.id === 'claude' && option.status?.loggedIn === false ? '로그인 필요' : ''].filter(Boolean).join(' · ') || '설치 확인됨'}</small><ul>{option.points.map(point => <li key={point}>{point}</li>)}</ul></div></button>)}</div>
+    <p className="field-help">선택은 환경설정 › AI 에이전트에서 언제든 바꿀 수 있습니다.</p>
+    <div className="modal-buttons"><button className="primary" disabled={busy} onClick={() => choose(selected)}>{busy ? '적용 중…' : `${agentName(selected)}로 시작`}</button></div></section></div>;
+}
+const stemModeOf = (stem: Row): StemMode => stem.stemMode === 'multi' ? 'multi' : 'two';
+function latestStemBatch(rows: Row[], mode: StemMode) {
+  const groups = new Map<string, { rows: Row[]; time: string }>();
+  for (const row of rows.filter(item => stemModeOf(item) === mode)) {
+    const key = row.stemBatchId || (row.audioPath ? String(row.audioPath).replace(/[/\\][^/\\]+$/, '') : 'legacy');
+    const group = groups.get(key) || { rows: [], time: '' };
+    group.rows.push(row); if ((row.createdAt || '') > group.time) group.time = row.createdAt;
+    groups.set(key, group);
+  }
+  const latest = [...groups.values()].sort((a, b) => b.time.localeCompare(a.time))[0]?.rows || [];
+  const order: Row = { vocal: 0, vocals: 0, instrumental: 1, instrument: 1, drum: 1, drums: 1, bass: 2, guitar: 3, piano: 4, other: 5 };
+  return [...latest].sort((a,b) => (order[String(a.stemName).toLowerCase()] ?? 9) - (order[String(b.stemName).toLowerCase()] ?? 9));
+}
+const stemLabel = (stem: Row) => ({ Vocal: '보컬', Vocals: '보컬', Instrumental: '반주', Instrument: '반주', Drum: '드럼', Drums: '드럼', Bass: '베이스', Guitar: '기타', Piano: '피아노', Other: '기타 악기' } as Row)[stem.stemName] || stem.stemName;
+function StemPopup({ source, stems: allStems, initialChoose, close, download, extract }: { source: Row; stems: Row[]; initialChoose: boolean; close: () => void; download: (ids: string[], single?: boolean) => Promise<void>; extract: (mode: StemMode) => Promise<void> }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [downloading, setDownloading] = useState(false);
+  const [choosing, setChoosing] = useState(initialChoose || !allStems.length);
+  const [mode, setMode] = useState<StemMode>(stemModeOf([...allStems].sort((a,b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))[0] || {}));
+  const [extracting, setExtracting] = useState(false);
+  const [error, setError] = useState('');
+  const stems = latestStemBatch(allStems, mode);
+  const batchSignature = stems.map(stem => stem.id).join(',');
+  useEffect(() => { setSelected([]); }, [mode, batchSignature]);
+  useEffect(() => { dialog.current?.showModal(); }, []);
+  const save = async (ids: string[], single = false) => { setDownloading(true); try { await download(ids, single); } finally { setDownloading(false); } };
+  const startExtraction = async () => { setError(''); setExtracting(true); try { await extract(mode); } catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); } finally { setExtracting(false); } };
+  return <dialog ref={dialog} className="stem-popup" onCancel={event => { event.preventDefault(); if (!downloading && !extracting) close(); }} onClick={event => { if (event.target === event.currentTarget && !downloading && !extracting) close(); }} aria-labelledby="stem-popup-title">
+    <div className="stem-popup-inner"><div className="modal-title"><div><span className="eyebrow">{choosing ? 'STEM EXTRACTION' : 'STEM RESULTS'}</span><h2 id="stem-popup-title">{source.title}</h2></div><button title="Stem 닫기" disabled={downloading || extracting} onClick={close}><Icon name="close" /></button></div>
+    {choosing ? <><p className="stem-mode-intro">어떻게 분리할까요?</p><div className="stem-mode-options">{(['two','multi'] as StemMode[]).map(value => <label key={value} className={mode === value ? 'selected' : ''}><input type="radio" name="stem-extraction-mode" value={value} checked={mode === value} disabled={extracting} onChange={() => setMode(value)} /><div><strong>{value === 'two' ? '1. Vocal + Instrument' : '2. Multi-track'}</strong><span>{value === 'two' ? '보컬과 반주를 2개 트랙으로 분리' : '보컬 · 드럼 · 베이스 · 기타 · 피아노 · 기타 악기, 총 6개 트랙'}</span></div></label>)}</div>{mode === 'multi' && <p className="stem-mode-note">현악기 등 별도 항목이 없는 악기는 ‘기타 악기 (Other)’에 포함됩니다.</p>}{stems.length > 0 && <p className="stem-mode-note">이 방식의 기존 결과가 있습니다. 다시 추출하면 최신 결과를 표시합니다.</p>}{error && <p className="job-error">{error}</p>}<div className="stem-mode-footer">{allStems.length > 0 && <button className="secondary" disabled={extracting} onClick={() => { if (!stems.length) setMode(stemModeOf(allStems[0])); setChoosing(false); }}>기존 결과 보기</button>}<button className="primary" disabled={extracting} onClick={() => void startExtraction()}>{extracting ? '작업 준비 중…' : stems.length ? '선택한 방식으로 다시 추출' : '선택한 방식으로 추출'}</button></div></> : <><div className="stem-result-heading"><div className="stem-result-tabs" role="group" aria-label="Stem 결과 방식">{(['two','multi'] as StemMode[]).filter(value => allStems.some(stem => stemModeOf(stem) === value)).map(value => <button key={value} className={mode === value ? 'selected' : ''} disabled={downloading} onClick={() => setMode(value)}>{value === 'two' ? '보컬 + 반주' : 'Multi-track · 6개'}</button>)}</div><button className="secondary" disabled={downloading} onClick={() => setChoosing(true)}>다시 추출</button></div><p className="stem-mode-note">선택한 방식의 최신 추출 결과만 표시합니다.</p>
+    <div className="stem-downloads"><label><input type="checkbox" aria-label="Stem 전체 선택" checked={selected.length === stems.length} onChange={e => setSelected(e.target.checked ? stems.map(t => t.id) : [])} />전체 선택</label><button className="secondary" disabled={downloading || !selected.length} onClick={() => void save(selected)}>선택 다운로드 ({selected.length})</button><button className="primary" disabled={downloading} onClick={() => void save(stems.map(t => t.id))}>전체 다운로드</button></div>
+    <div className="stem-list">{stems.map(stem => <div className="stem-row" data-stem={String(stem.stemName).toLowerCase()} key={stem.id}><label><input type="checkbox" aria-label={stem.stemName + ' 선택'} checked={selected.includes(stem.id)} onChange={e => setSelected(ids => e.target.checked ? [...ids, stem.id] : ids.filter(id => id !== stem.id))} /><strong>{stemLabel(stem)}</strong></label><StemWaveform id={stem.id} label={stemLabel(stem)} audioUrl={stem.audioUrl} audioLabel={stem.stemName + ' 재생'} /><button className="secondary" disabled={downloading} onClick={() => void save([stem.id], true)}>다운로드</button></div>)}</div></>}</div>
+  </dialog>;
+}
+
+const isTopDialog = (element: HTMLElement | null) => { const dialogs = document.querySelectorAll('[role="dialog"]'); return dialogs.item(dialogs.length - 1) === element; };
+function TrackTextEditor({ track, close, save }: { track: Row; close: () => void; save: (title: string, lyrics: string, analyze: boolean) => Promise<void> }) {
+  const dialogSurface = useRef<HTMLElement>(null);
+  const [title, setTitle] = useState(track.title || ''); const [lyrics, setLyrics] = useState(track.lyrics || ''); const [pending, setPending] = useState(false); const [error, setError] = useState('');
+  const submit = async (analyze: boolean) => { setPending(true); setError(''); try { await save(title.trim(), lyrics, analyze); close(); } catch (error) { setError(error instanceof Error ? error.message : String(error)); } finally { setPending(false); } };
+  useEffect(() => { const key = (event: KeyboardEvent) => { if (event.key === 'Escape' && !pending && isTopDialog(dialogSurface.current)) close(); }; document.addEventListener('keydown', key); return () => document.removeEventListener('keydown', key); }, [pending, close]);
+  return <div className="modal-backdrop" onClick={() => !pending && close()}><section ref={dialogSurface} className="modal track-text-modal" role="dialog" aria-modal="true" aria-labelledby="track-text-heading" onClick={event => event.stopPropagation()}><div className="modal-title"><div><span className="eyebrow">SONG TEXT</span><h2 id="track-text-heading">제목·가사 수정</h2></div><button title="제목·가사 수정 닫기" disabled={pending} onClick={close}><Icon name="close" /></button></div><label className="field-label" htmlFor="track-text-title">곡 제목</label><input id="track-text-title" value={title} maxLength={180} disabled={pending} onChange={event => setTitle(event.target.value)} /><label className="field-label" htmlFor="track-text-lyrics">가사</label><textarea id="track-text-lyrics" value={lyrics} maxLength={10000} disabled={pending} onChange={event => setLyrics(event.target.value)} placeholder="노래에 맞는 가사를 입력하세요. [Verse] 같은 구간 표시는 그대로 저장됩니다." /><p className="field-help">음악 파일은 유지하고 제목과 가사를 저장합니다. 시간 분석은 노래에서 인식한 구간을 저장된 가사 원문에 맞춥니다.</p>{lyrics.length >= 10000 && <p className="job-error">({lyrics.length.toLocaleString()}/10,000)</p>}{error && <p className="job-error">{error}</p>}<div className="modal-buttons"><button className="secondary" disabled={pending} onClick={close}>취소</button><button className="secondary" disabled={pending || !title.trim() || !lyrics.trim() || lyrics.length > 10000} onClick={() => void submit(true)}>가사 시간 분석</button><button className="primary" disabled={pending || !title.trim() || lyrics.length > 10000} onClick={() => void submit(false)}>{pending ? '저장 중…' : '저장'}</button></div></section></div>;
+}
+export default function App() {
+  const [data, setData] = useState<Snapshot>(empty); const [loaded, setLoaded] = useState(false);
+  const [videoPlaylistId, setVideoPlaylistId] = useState(''); const [videoPreviewId, setVideoPreviewId] = useState('');
+  const [textTrackId, setTextTrackId] = useState(''); const [timingTrackId, setTimingTrackId] = useState(''); const alignmentOrigins = useRef(new Map<string, string>());
+  const [masteringTrack, setMasteringTrack] = useState<Row | null>(null); const [masteringOptions, setMasteringOptions] = useState(masteringDefaults);
+  const [importDialog, setImportDialog] = useState<Row | null>(null); const [youtubeUrl, setYoutubeUrl] = useState(''); const [youtubeFormat, setYoutubeFormat] = useState('wav');
+  const [playlistId, setPlaylistId] = useState(''); const [playlistsOpen, setPlaylistsOpen] = useState(true); const [targetPlaylist, setTargetPlaylist] = useState('');
+  const [playbackOpen, setPlaybackOpen] = useState(false); const [playbackQueue, setPlaybackQueue] = useState<PlaybackQueue | null>(null); const [shuffle, setShuffle] = useState(false); const [repeat, setRepeat] = useState<'off' | 'all' | 'one'>('off');
+  const [projectsOpen, setProjectsOpen] = useState(true);
+  const [selectedTracks, setSelectedTracks] = useState<string[]>([]);
+  const [batchAction, setBatchAction] = useState('move'); const [targetProject, setTargetProject] = useState('');
+  const [page, setPage] = useState('home'); const [projectId, setProjectId] = useState('');
+  const [title, setTitle] = useState(''); const [lyrics, setLyrics] = useState(''); const [style, setStyle] = useState('');
+  const [presetId, setPresetId] = useState(''); const [presetPage, setPresetPage] = useState(0); const [instrumental, setInstrumental] = useState(false); const [instrumentalDuration, setInstrumentalDuration] = useState(180); const [count, setCount] = useState(1);
+  const [parent, setParent] = useState<Row | null>(null); const [search, setSearch] = useState(''); const [busy, setBusy] = useState(''); const [notice, setNoticeText] = useState('');
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setNotice = useCallback((message: string) => {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    setNoticeText(message);
+    noticeTimer.current = message ? setTimeout(() => { setNoticeText(''); noticeTimer.current = null; }, 3000) : null;
+  }, []);
+  useEffect(() => () => { if (noticeTimer.current) clearTimeout(noticeTimer.current); }, []);
+  const [modal, setModal] = useState<{ title: string; label: string; value: string; confirmOnly?: boolean; confirmLabel?: string; cancelLabel?: string; action: (value: string) => Promise<void>; onCancel?: () => void } | null>(null);
+  // Choice layers: songs to add to a playlist, and trashed songs whose project was deleted.
+  const [playlistPicker, setPlaylistPicker] = useState<string[] | null>(null);
+  const [restorePicker, setRestorePicker] = useState<string[] | null>(null);
+  const [pickerName, setPickerName] = useState('');
+  const [active, setActive] = useState<Row | null>(null); const [playing, setPlaying] = useState(false); const [position, setPosition] = useState(0); const [duration, setDuration] = useState(0); const [volume, setVolume] = useState(.8); const audio = useRef<HTMLAudioElement>(null);
+  const currentActive = data.tracks.find(track => track.id === active?.id) || data.trash?.find(track => track.id === active?.id) || active;
+  const [stemSourceId, setStemSourceId] = useState('');
+  const [stemChoose, setStemChoose] = useState(false);
+  const stemSource = data.tracks.find(track => track.id === stemSourceId);
+  const stemRows = data.tracks.filter(track => track.kind === 'stem' && track.parentId === stemSourceId);
+  const [detailId, setDetailId] = useState('');
+  const detailTrack = data.tracks.find(track => track.id === detailId);
+  const sourceTrack = data.tracks.find(track => track.id === detailTrack?.parentId);
+  const openDetails = (id: string) => { setDetailId(id); setQueueOpen(false); setPlaybackOpen(false); setVideoPreviewId(''); };
+  const [queueOpen, setQueueOpen] = useState(false); const [clock, setClock] = useState(Date.now()); const [draft, setDraft] = useState<Row>({});
+  const [selectedTrash, setSelectedTrash] = useState<string[]>([]);
+  useEffect(() => { setSelectedTrash(ids => ids.filter(id => data.trash?.some(track => track.id === id && track.kind !== 'stem'))); }, [data.trash]);
+  const [lyricsResultId, setLyricsResultId] = useState('');
+  const lyricsOrigins = useRef(new Map<string, string>());
+  const seenFinished = useRef<Set<string> | null>(null);
+  const completedLyrics = data.jobs.filter(job => job.status === 'completed' && job.result?.lyrics);
+  const lyricsResult = completedLyrics.find(job => job.id === lyricsResultId);
+  const resultProjectId = lyricsResult?.projectId || lyricsOrigins.current.get(lyricsResultId);
+  useEffect(() => {
+    if (!loaded) return;
+    const finished = data.jobs.filter(job => ['completed','failed','cancelled','needs-confirmation'].includes(job.status));
+    if (!seenFinished.current) { seenFinished.current = new Set(finished.map(job => job.id)); return; }
+    for (const job of finished) {
+      if (seenFinished.current.has(job.id)) continue;
+      seenFinished.current.add(job.id);
+      if (job.status === 'completed' && job.type === 'mastering') setNotice('마스터링을 완료했습니다. 원곡과 별도로 저장했습니다.');
+      if (job.status === 'completed' && alignmentOrigins.current.has(job.id)) { alignmentOrigins.current.delete(job.id); setNotice('가사 시간 분석을 마쳤습니다.'); }
+      if (job.status === 'completed' && job.result?.videoId) { setVideoPreviewId(job.result.videoId); setQueueOpen(false); setPlaybackOpen(false); setDetailId(''); setNotice('플레이리스트 영상을 저장했습니다.'); }
+      if (job.status === 'failed') setNotice(job.error || `${job.title || '작업'}에 실패했습니다.`);
+      // Lyric lines that need a decision open their confirmation window right away (same as the banner).
+      if (job.status === 'needs-confirmation' && job.result?.awaitingConfirmation) {
+        // The window itself lists the lines to confirm and any failed songs, so no toast covers it.
+        audio.current?.pause(); setQueueOpen(false); setPlaybackOpen(false); setDetailId('');
+        if (job.result.playlistId) setVideoPlaylistId(job.result.playlistId); else if (job.result.trackIds?.[0]) setTimingTrackId(job.result.trackIds[0]);
+      }
+      if (job.status === 'completed' && job.result?.lyrics) { setLyricsResultId(job.id); setQueueOpen(false); }
+    }
+  }, [data.jobs, loaded, setNotice]);
+  useEffect(() => { if (!masteringTrack) return; const close = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) setMasteringTrack(null); }; document.addEventListener('keydown', close); return () => document.removeEventListener('keydown', close); }, [masteringTrack, busy]);
+  useEffect(() => { if (queueOpen) { setDetailId(''); setPlaybackOpen(false); setVideoPreviewId(''); } }, [queueOpen]);
+  useEffect(() => { setDetailId(''); }, [page, projectId]);
+  useEffect(() => {
+    const closeMenus = (event: MouseEvent) => {
+      const target = event.target as Element;
+      document.querySelectorAll<HTMLDetailsElement>('.track-actions details[open]').forEach(menu => {
+        if (!menu.contains(target) || target.closest('.track-menu button')) menu.open = false;
+      });
+    };
+    const escapeMenu = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      const menu = document.querySelector<HTMLDetailsElement>('.track-actions details[open]');
+      if (menu) { menu.open = false; menu.querySelector('summary')?.focus(); }
+    };
+    document.addEventListener('click', closeMenus);
+    document.addEventListener('keydown', escapeMenu);
+    return () => { document.removeEventListener('click', closeMenus); document.removeEventListener('keydown', escapeMenu); };
+  }, []);
+  useEffect(() => { document.querySelectorAll<HTMLDetailsElement>('.track-actions details[open]').forEach(menu => { menu.open = false; }); }, [page, projectId]);
+  const initialized = useRef(false);
+  const draftProject = useRef('');
+  const draftCache = useRef(new Map<string, Row>());
+  // Title/lyrics/style last sent to 음악 생성하기 per project (a new AI song must not inherit them).
+  const submittedDrafts = useRef(new Map<string, Row>());
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [loadedProject, setLoadedProject] = useState('');
+  const settingsBaseline = useRef<Row>({});
+  const refresh = useCallback(async () => {
+    if (!window.boks) { setNotice('데스크톱 연결을 찾을 수 없습니다. Electron 앱에서 실행해 주세요.'); setLoaded(true); return; }
+    try { const next = await window.boks.invoke('bootstrap'); setData({ ...empty, ...next }); setProjectId(prev => next.projects.some((p: Row) => p.id === prev) ? prev : next.projects[0]?.id || ''); if (!initialized.current) { setCount(next.settings?.defaultCount || 1); setDraft(next.settings || {}); initialized.current = true; } setLoaded(true); } catch (error) { setNotice(String(error instanceof Error ? error.message : error)); setLoaded(true); }
+  }, []);
+  useEffect(() => { void refresh(); const off = window.boks?.onUpdate(() => void refresh()); const timer = setInterval(() => setClock(Date.now()), 1000); return () => { off?.(); clearInterval(timer); }; }, [refresh]);
+  useEffect(() => {
+    if (!projectId || draftProject.current === projectId) return;
+    draftProject.current = projectId;
+    const saved = draftCache.current.get(projectId) || data.projects.find(p => p.id === projectId)?.draft;
+    if (saved) { setTitle(saved.title || ''); setLyrics(saved.lyrics || ''); setStyle(saved.style || ''); setPresetId(saved.presetId || ''); setInstrumental(!!saved.instrumental); setInstrumentalDuration(durationChoice(saved.instrumentalDuration)); setCount(saved.count || data.settings.defaultCount || 1); }
+    else { setTitle(''); setLyrics(''); setStyle(''); setPresetId(''); setInstrumental(false); setInstrumentalDuration(180); setCount(data.settings.defaultCount || 1); }
+    setLoadedProject(projectId);
+    setParent(null);
+  }, [projectId, data.projects, data.settings, parent]);
+  useEffect(() => {
+    if (!loaded || !projectId || loadedProject !== projectId || parent) return;
+    const value = { title, lyrics, style, presetId, instrumental, instrumentalDuration, count };
+    draftCache.current.set(projectId, value);
+    saveTimer.current = setTimeout(() => { void window.boks?.invoke('saveDraft', { projectId, draft: value }).catch(() => setNotice('입력 내용을 저장하지 못했습니다. 저장 공간을 확인해 주세요.')); saveTimer.current = null; }, 650);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+  }, [loaded, loadedProject, projectId, title, lyrics, style, presetId, instrumental, instrumentalDuration, count, parent]);
+  useEffect(() => {
+    const old = settingsBaseline.current;
+    setDraft(current => Object.fromEntries(Object.entries(data.settings).map(([key, value]) => [key, current[key] === undefined || current[key] === old[key] ? value : current[key]])));
+    settingsBaseline.current = data.settings;
+  }, [data.settings]);
+  const flushDraft = () => {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    if (!projectId || loadedProject !== projectId || parent) return;
+    const value = { title, lyrics, style, presetId, instrumental, instrumentalDuration, count };
+    draftCache.current.set(projectId, value);
+    void window.boks?.invoke('saveDraft', { projectId, draft: value }).catch(() => setNotice('초안 저장에 실패했습니다. 앱을 종료하기 전에 저장 공간을 확인하세요.'));
+  };
+  useEffect(() => window.boks?.onBeforeClose(async () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    if (projectId && loadedProject === projectId && !parent) await window.boks?.invoke('saveDraft', { projectId, draft: { title, lyrics, style, presetId, instrumental, instrumentalDuration, count } });
+  }), [projectId, loadedProject, parent, title, lyrics, style, presetId, instrumental, instrumentalDuration, count]);
+  const switchProject = (id: string) => {
+    flushDraft();
+    // A cover is a temporary editor context. Reopening its project restores its own draft.
+    if (parent) { draftProject.current = ''; setLoadedProject(''); }
+    setParent(null); setProjectId(id); setPage('create');
+  };
+  const call = async (method: string, payload?: unknown) => { if (!window.boks) throw new Error('Electron 데스크톱 앱에서 실행해 주세요.'); return window.boks.invoke(method, payload); };
+  const run = async (key: string, action: () => Promise<any>) => { setBusy(key); try { await action(); await refresh(); } catch (error) { setNotice(String(error instanceof Error ? error.message : error).replace(/^Error invoking remote method '[^']+': Error: /, '')); } finally { setBusy(''); } };
+  const ask = (title: string, label: string, action: (value: string) => Promise<void>, value = '', onCancel?: () => void) => { setModal({ title, label, action, value, onCancel }); };
+  const cancelModal = () => { if (busy) return; const onCancel = modal?.onCancel; setModal(null); onCancel?.(); };
+  const newProject = () => ask('새로운 프로젝트', '프로젝트 이름', async name => { flushDraft(); const p = await call('createProject', { name }); switchProject(p.id); }, '');
+  const playlist = data.playlists?.find(item => item.id === playlistId);
+  const newPlaylist = () => ask('새 플레이리스트', '플레이리스트 이름', async name => { const result = await call('createPlaylist', { name }); setPlaylistId(result.id); setPage('playlist'); setSearch(''); });
+  const renameCurrentProject = () => { if (!project) return; const id = project.id; ask('프로젝트 이름 변경', '프로젝트 이름', name => call('renameProject', { id, name }), project.name); };
+  // Deleting a project moves all of its music (with Stems) to the trash; it can be restored into another project.
+  const deleteCurrentProject = () => {
+    if (!project) return;
+    const target = project, rows = data.tracks.filter(track => track.projectId === target.id), songs = rows.filter(track => track.kind !== 'stem').length, stems = rows.length - songs;
+    setModal({ title: '프로젝트 삭제', confirmOnly: true, confirmLabel: '프로젝트 삭제', value: '', label: `「${target.name}」 프로젝트를 삭제합니다. 이 프로젝트에 포함된 음악 ${songs}곡${stems ? `과 Stem ${stems}개가` : '이'} 모두 함께 삭제되어 휴지통으로 이동합니다. 휴지통에서 다른 프로젝트로 복원할 수 있습니다.`, action: async () => {
+      if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+      await call('deleteProject', { id: target.id });
+      draftCache.current.delete(target.id); setSelectedTracks([]); setSearch('');
+      if (active && rows.some(track => track.id === active.id)) { audio.current?.pause(); setActive(null); setPlaying(false); }
+      setPage('home'); setNotice(`「${target.name}」 프로젝트를 삭제하고 음악 ${songs}곡을 휴지통으로 옮겼습니다.`);
+    } });
+  };
+  const removeFromCurrentPlaylist = (ids: string[]) => void run('removeFromPlaylist', async () => { await call('removeFromPlaylist', { playlistId, ids }); setSelectedTracks(selected => selected.filter(id => !ids.includes(id))); setNotice(ids.length === 1 ? '플레이리스트에서 제거했습니다.' : `${ids.length}곡을 플레이리스트에서 제거했습니다.`); });
+  const openPlaylistPicker = (ids: string[]) => { setPickerName(''); setPlaylistPicker(ids); };
+  const addPickedToPlaylist = (target: Row) => void run('addToPlaylist', async () => { await call('addToPlaylist', { playlistId: target.id, ids: playlistPicker }); setPlaylistPicker(null); setNotice(`「${target.name}」 플레이리스트에 추가했습니다.`); });
+  const createPlaylistForPicked = () => void run('addToPlaylist', async () => { const created = await call('createPlaylist', { name: pickerName.trim() }); await call('addToPlaylist', { playlistId: created.id, ids: playlistPicker }); setPlaylistPicker(null); setNotice(`「${created.name}」 플레이리스트를 만들고 추가했습니다.`); });
+  // Songs whose project still exists (even renamed) go back to it; for a deleted project the user picks one.
+  const restoreTracks = (ids: string[]) => {
+    if ((data.trash || []).some(track => ids.includes(track.id) && !data.projects.some(item => item.id === track.projectId))) { setPickerName(''); setRestorePicker(ids); return; }
+    void run('restoreTracks', async () => { await call('restoreTracks', { ids }); setSelectedTrash(selected => selected.filter(id => !ids.includes(id))); setNotice(ids.length === 1 ? '곡을 복원했습니다.' : `${ids.length}곡을 복원했습니다.`); });
+  };
+  const restoreInto = (target: Row | null) => void run('restoreTracks', async () => {
+    const ids = restorePicker || [], destination = target || await call('createProject', { name: pickerName.trim() });
+    await call('restoreTracks', { ids, projectId: destination.id }); setRestorePicker(null); setSelectedTrash(selected => selected.filter(id => !ids.includes(id)));
+    setNotice(`「${destination.name}」 프로젝트로 복원했습니다.`);
+  });
+  // Every song of the page (the title badge counts these); `tracks` is what the search shows.
+  const pageTracks = data.tracks.filter(t => t.kind !== 'stem' && (page === 'playlist' ? playlist?.trackIds.includes(t.id) : page === 'imports' ? isImportedAudio(t) : page === 'library' || t.projectId === projectId));
+  const tracks = pageTracks.filter(t => `${t.title} ${t.style}`.toLowerCase().includes(search.toLowerCase())).sort((a,b) => page === 'playlist' ? (playlist?.trackIds.indexOf(a.id) ?? 0) - (playlist?.trackIds.indexOf(b.id) ?? 0) : newestMusicFirst(a,b));
+  useEffect(() => { setSelectedTracks([]); }, [page, projectId, playlistId, search]);
+  useEffect(() => { setSelectedTracks(ids => ids.filter(id => data.tracks.some(track => track.id === id))); }, [data.tracks]);
+  // Paused videos live on the 영상 제작 page. The banner is for lyric analyses only: the latest one
+  // per song, and only while that song still has lines to confirm.
+  const confirmationJobs = data.jobs.filter(job => job.type !== 'video' && job.status === 'needs-confirmation' && job.result?.awaitingConfirmation)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .filter((job, index, list) => { const id = job.result?.trackIds?.[0], track = data.tracks.find(item => item.id === id); return list.findIndex(other => other.result?.trackIds?.[0] === id) === index && (!!job.result?.alignmentFailures?.length || !track?.lyricTiming?.cues?.length || track.lyricTiming.cues.some((cue: Row) => !['manual', 'automatic'].includes(cue.status))); });
+  const videoAttention = (() => { const work = videoWork(data.jobs); return work.active.length + work.waiting.length + work.failed.length; })();
+  const jobs = data.jobs.filter(j => ['queued', 'running'].includes(j.status));
+  const previousActiveJobs = useRef(0);
+  useEffect(() => {
+    if (previousActiveJobs.current > 0 && jobs.length === 0) setQueueOpen(false);
+    previousActiveJobs.current = jobs.length;
+  }, [jobs.length]);
+  const project = data.projects.find(p => p.id === projectId);
+  // A badge re-check runs in the background; it must not lock the rest of the app.
+  const [claudeChecking, setClaudeChecking] = useState(false);
+  const checkClaude = () => { setClaudeChecking(true); void call('refreshClaude').then(refresh).catch(error => setNotice(String(error instanceof Error ? error.message : error))).finally(() => setClaudeChecking(false)); };
+  const previewVideo = videoPreviewId ? data.videos?.find(video => video.id === videoPreviewId) : undefined;
+  const agents = data.agents;
+  const lyricsAgentReason = !agents || agents.active ? '' : agents.reason;
+  const imageReason = !agents || agents.imageAgent ? '' : agents.imageReason;
+  const engineRows: Row[] = data.engines;
+  const presetMode = instrumental ? 'instrumental' : 'vocal';
+  const visiblePresets = data.presets.filter(preset => !preset.mode || preset.mode === presetMode);
+  const presetPages = Math.max(1, Math.ceil(visiblePresets.length / 6));
+  const shownPresetPage = Math.min(presetPage, presetPages - 1);
+  const presetCategory = (preset: Row) => preset.category || (preset.mode ? '사용자 프리셋' : '공용 사용자 프리셋');
+  const presetCategories = [...new Set(visiblePresets.map(presetCategory))];
+  useEffect(() => { setPresetPage(0); }, [instrumental]);
+  const changeInstrumental = (next: boolean) => {
+    const selected = data.presets.find(preset => preset.id === presetId);
+    if (selected?.mode && selected.mode !== (next ? 'instrumental' : 'vocal')) {
+      setPresetId('');
+      if (style === selected.prompt) { setStyle(''); setNotice(`${next ? '경음악' : '가사곡'} 전용 프리셋을 선택해 주세요.`); }
+      else setNotice('프리셋 선택을 해제했습니다. 직접 수정한 스타일은 유지됩니다.');
+    }
+    setInstrumental(next);
+  };
+  const resetComposer = () => {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    const empty = { title: '', lyrics: '', style: '', presetId: '', instrumental: false, instrumentalDuration: 180, count: data.settings.defaultCount || 1 };
+    draftCache.current.set(projectId, empty);
+    draftProject.current = projectId; setLoadedProject(projectId);
+    setTitle(''); setLyrics(''); setStyle(''); setPresetId(''); setPresetPage(0);
+    setInstrumental(false); setInstrumentalDuration(180); setCount(empty.count); setParent(null);
+    if (projectId) void window.boks?.invoke('saveDraft', { projectId, draft: empty }).catch(() => setNotice('초기화한 입력 내용을 저장하지 못했습니다.'));
+  };
+  const inputUsage = inspectYue2Input(style, lyrics, instrumental);
+  const musicEngine = engineRows.find(e => e.id === 'music');
+  const play = (track: Row, preserveQueue = false) => { if (!preserveQueue) { setPlaybackQueue(null); }  if (!track.audioUrl) { setNotice('이 곡의 재생 가능한 오디오 파일을 찾을 수 없습니다.'); return; } if (active?.id === track.id) { playing ? audio.current?.pause() : void audio.current?.play().catch(error => { if (error?.name !== 'AbortError') setNotice('오디오를 재생할 수 없습니다. 파일을 확인해 주세요.'); }); } else { setActive(track); setPosition(0); setDuration(Number.isFinite(track.duration) ? track.duration : 0); } };
+  useEffect(() => { if (active && audio.current) { audio.current.load(); void audio.current.play().catch(error => { if (error?.name !== 'AbortError') setNotice('오디오를 재생할 수 없습니다. 파일을 확인해 주세요.'); }); } }, [active]);
+  useEffect(() => { if (audio.current) audio.current.volume = volume; }, [volume]);
+  const syncPlayback = () => {
+    const element = audio.current;
+    if (!element) return;
+    const length = Number.isFinite(element.duration) && element.duration > 0 ? element.duration : Number(active?.duration) || 0;
+    setDuration(length);
+    setPosition(Math.max(0, Math.min(element.currentTime || 0, length || Infinity)));
+  };
+  const seek = (value: string) => {
+    if (!audio.current || duration <= 0) return;
+    const next = Math.max(0, Math.min(Number(value), duration));
+    audio.current.currentTime = next;
+    setPosition(next);
+  };
+  const openPlayback = () => { setQueueOpen(false); setDetailId(''); setVideoPreviewId(''); setPlaybackOpen(true); };
+  const playQueued = (queue: PlaybackQueue) => { const track = data.tracks.find(item => item.id === currentQueueId(queue)); if (!track) return; if (active?.id === track.id) { if (audio.current) { audio.current.currentTime = 0; void audio.current.play().catch(error => { if (error?.name !== 'AbortError') setNotice('오디오를 재생할 수 없습니다.'); }); } } else play(track, true); };
+  const startPlayback = (ids: string[]) => { const playable = ids.filter(id => data.tracks.some(track => track.id === id && track.audioUrl)); if (!playable.length) { setNotice('재생 가능한 음악이 없습니다.'); return; } const queue = createPlaybackQueue(playable, { shuffle, repeat }); setPlaybackQueue(queue); openPlayback(); playQueued(queue); };
+  const stepPlayback = (direction = 1, ended = false) => { if (!playbackQueue) { setPlaying(false); return; } if (!active && !ended) { playQueued(playbackQueue); return; } const next = stepPlaybackQueue(playbackQueue, { direction, ended }); if (!next) { audio.current?.pause(); setPlaying(false); return; } setPlaybackQueue(next); playQueued(next); };
+  useEffect(() => { if (!playbackQueue) return; const allowed = data.tracks.filter(track => track.kind !== 'stem' && track.audioUrl).map(track => track.id); const next = retainQueueTracks(playbackQueue, allowed); if (JSON.stringify(next) === JSON.stringify(playbackQueue)) return; const currentRemoved = !next || currentQueueId(next) !== currentQueueId(playbackQueue); setPlaybackQueue(next); if (currentRemoved) { audio.current?.pause(); setPlaying(false); setActive(null); } }, [data.tracks, playbackQueue]);
+  const copyText = async (text: string, label: string) => {
+    try { await call('copyText', { text }); setNotice(`${label}를 복사했습니다.`); }
+    catch { setNotice('복사하지 못했습니다. 텍스트를 선택해 복사해 주세요.'); }
+  };
+  const cover = (track: Row) => { flushDraft(); draftProject.current = track.projectId; setLoadedProject(track.projectId); setProjectId(track.projectId); setParent(track); setTitle(`${track.title} · Cover`); setLyrics(track.lyrics || ''); setStyle(track.style || ''); setPresetId(track.presetId || ''); setInstrumental(!!track.instrumental); setInstrumentalDuration(durationChoice(track.instrumentalDuration ?? track.metadata?.instrumentalDuration)); setPage('create'); };
+  const importAudio = () => {
+    setYoutubeUrl(''); setYoutubeFormat('wav');
+    // From a playlist page the song also joins that playlist (stored with the import request).
+    setImportDialog({ step: 'choose', projectId: projectId || data.projects[0]?.id || '', ...(page === 'playlist' && playlist ? { playlistId: playlist.id } : {}) });
+  };
+  const finishMusicImport = () => {
+    const target = data.playlists?.find(item => item.id === importDialog?.playlistId);
+    setImportDialog(null); setSearch(''); setDetailId(''); setQueueOpen(false);
+    if (target) { setPlaylistId(target.id); setPage('playlist'); setNotice(`음악을 가져와 「${target.name}」 플레이리스트에 담았습니다.`); }
+    else { setPage('imports'); setNotice('음악을 가져왔습니다.'); }
+  };
+  const chooseLocalMusic = () => void run('import', async () => {
+    const track = await call('importAudio', { projectId: importDialog?.projectId, ...(importDialog?.playlistId ? { playlistId: importDialog.playlistId } : {}) });
+    if (track) { await refresh(); finishMusicImport(); }
+  });
+  const extractYoutube = () => void run('youtubeExtract', async () => {
+    const result = await call('extractYoutube', { projectId: importDialog?.projectId, url: youtubeUrl.trim(), ...(importDialog?.playlistId ? { playlistId: importDialog.playlistId } : {}) });
+    setImportDialog(current => ({ ...current, step: 'progress', jobId: result.jobId, extractionJobId: result.jobId }));
+  });
+  const closeMusicImport = () => {
+    if (!importDialog || busy) return;
+    const dialog = importDialog;
+    const extraction = data.jobs.find(item => item.id === (dialog.extractionJobId || dialog.jobId));
+    if (dialog.jobId && (dialog.step === 'format' || (dialog.step === 'progress' && extraction?.status === 'completed'))) void run('discardYoutube', async () => { await call('discardYoutube', { jobId: dialog.extractionJobId || dialog.jobId }); setImportDialog(null); });
+    else if (dialog.jobId && ['progress','importing'].includes(dialog.step)) void run('cancelYoutube', async () => { const job = data.jobs.find(item => item.id === dialog.jobId); const isActive = !job || ['queued','running'].includes(job.status); if (isActive) await call('cancelJob', { id: dialog.jobId }); if (!isActive && dialog.step === 'importing' && extraction?.status === 'completed' && !extraction.result?.importedTrackId) await call('discardYoutube', { jobId: dialog.extractionJobId }); setImportDialog(null); });
+    else setImportDialog(null);
+  };
+  const youtubeJob = importDialog?.jobId ? data.jobs.find(job => job.id === importDialog.jobId) : null;
+  useEffect(() => {
+    if (!importDialog?.jobId) return;
+    const job = data.jobs.find(item => item.id === importDialog.jobId);
+    if (job?.status !== 'completed') return;
+    if (importDialog.step === 'progress') setImportDialog(current => ({ ...current, step: 'format' }));
+    else if (importDialog.step === 'importing') finishMusicImport();
+  }, [data.jobs, importDialog?.jobId, importDialog?.step]);
+  const applyBatchAction = () => {
+    const ids = [...selectedTracks]; if (!ids.length) return;
+    if (batchAction === 'playlist') { if (!targetPlaylist) return; void run('addToPlaylist', async () => { await call('addToPlaylist', { playlistId: targetPlaylist, ids }); setSelectedTracks([]); setNotice('플레이리스트에 추가했습니다.'); }); } else if (batchAction === 'move') {
+      if (!targetProject) return;
+      void run('moveTracks', async () => { await call('moveTracks', { ids, projectId: targetProject }); setSelectedTracks([]); setNotice('선택한 음악을 프로젝트로 이동했습니다.'); });
+    } else setModal({ title: '휴지통으로 이동', label: `선택한 ${ids.length}곡을 휴지통으로 이동하시겠습니까?`, value: '', confirmOnly: true, confirmLabel: '이동', action: async () => {
+      await call('trashTracks', { ids }); if (active && ids.includes(active.id)) setActive(null); if (ids.includes(detailId)) setDetailId(''); setSelectedTracks([]); setNotice('선택한 음악을 휴지통으로 이동했습니다.');
+    } });
+  };
+  const generate = () => run('generate', async () => { submittedDrafts.current.set(projectId, { title: title.trim() || '제목 없는 곡', lyrics, style }); await call('generate', { projectId, title: title.trim() || '제목 없는 곡', lyrics, style, presetId, instrumental, instrumentalDuration, count, parentId: parent?.id }); setQueueOpen(true); });
+  // A new song from a theme must not inherit the song just made: values the composer still holds from the
+  // last 음악 생성하기 (even while it is generating) or from the project's newest song are not sent.
+  // Anything the user typed or chose differs from those and is still passed on.
+  const editLyrics = (mode: string) => ask(mode === 'rewrite' ? '가사를 새롭게 다듬기' : '어떤 이야기를 노래할까요?', '주제, 분위기, 원하는 이야기를 알려 주세요', async prompt => {
+    const used = mode === 'rewrite' ? [] : [submittedDrafts.current.get(projectId), data.tracks.filter(track => track.projectId === projectId && track.kind !== 'stem').sort(newestMusicFirst)[0]].filter(Boolean) as Row[];
+    const leftover = (value: string, field: string) => !!value.trim() && used.some(song => value.trim() === String(song[field] || '').trim());
+    const queued = await call('lyrics', { prompt, lyrics: leftover(lyrics, 'lyrics') ? '' : lyrics, mode: mode === 'rewrite' ? 'edit' : 'create', projectId, currentTitle: leftover(title, 'title') ? '' : title, style: leftover(style, 'style') ? '' : style });
+    lyricsOrigins.current.set(queued.jobId, projectId); setQueueOpen(true);
+  });
+  const trashTracks = (data.trash || []).filter(track => track.kind !== 'stem').sort(newestMusicFirst);
+  const purgeTrash = (ids: string[]) => {
+    if (!ids.length) return;
+    setModal({ title: '곡 완전 삭제', label: `${ids.length === 1 ? '곡을' : `선택한 ${ids.length}곡을`} 완전 삭제하시겠습니까? 로컬 음원, 앨범아트 및 관련 작업 파일은 복구할 수 없습니다.`, value: '', confirmOnly: true, action: async () => {
+      const affected = new Set([...ids, ...(data.trash || []).filter(track => ids.includes(track.parentId)).map(track => track.id)]);
+      if (active && affected.has(active.id)) {
+        audio.current?.pause(); audio.current?.removeAttribute('src'); audio.current?.load();
+        setActive(null); setPlaying(false); setPosition(0); setDuration(0);
+      }
+      await call('purgeTracks', { ids }); setSelectedTrash(selected => selected.filter(id => !ids.includes(id)));
+      setNotice('선택한 곡을 완전히 삭제했습니다.');
+    } });
+  };
+  // After a song's lyric timing is saved: open the next song of the same waiting job that still needs a decision;
+  // when none is left, a waiting video continues with its saved settings.
+  const continueAfterTiming = async (savedId: string) => {
+    const snapshot = await call('bootstrap'); await refresh();
+    const tracks = snapshot.tracks as Row[], waiting = (snapshot.jobs as Row[]).filter(item => item.status === 'needs-confirmation' && item.result?.awaitingConfirmation);
+    // A song needs the editor while any line is undecided, or when its automatic analysis failed and nothing was saved yet.
+    const needsReview = (id: string, job: Row) => { const track = tracks.find(item => item.id === id), cues = track?.lyricTiming?.cues as Row[] | undefined; return !!track && (cues?.length ? cues.some(cue => !['manual', 'automatic'].includes(cue.status)) : !!job.result?.alignmentFailures?.some((failure: Row) => failure.trackId === id)); };
+    // The editor switches to the next song (its title shows which); no toast, which would cover the editor.
+    const openNext = (id: string) => setTimingTrackId(id);
+    const job = waiting.find(item => item.result?.trackIds?.includes(savedId));
+    const nextId = (job?.result?.trackIds as string[] | undefined)?.find(id => id !== savedId && needsReview(id, job!));
+    if (nextId) { openNext(nextId); return; }
+    if (job?.result?.playlistId) {
+      // Every song is confirmed: say so, then continue to rendering with the saved video settings.
+      const count = (job.result.trackIds as string[] | undefined)?.length || 1, playlistTarget = job.result.playlistId as string;
+      setModal({ title: '가사 확인 완료', confirmOnly: true, value: '', confirmLabel: '영상 제작 시작', cancelLabel: '나중에', label: `${count}곡의 가사 시간을 모두 확인했습니다. 저장된 영상 설정으로 제작을 이어서 시작합니다.`, action: async () => {
+        try { await call('resumeVideo', { jobId: job.id }); setVideoPlaylistId(''); setQueueOpen(true); setNotice('영상 제작을 시작했습니다. 진행 상황은 작업 대기열에서 볼 수 있습니다.'); }
+        catch (error) { setVideoPlaylistId(playlistTarget); throw error; }
+      }, onCancel: () => setNotice('영상 제작은 상단의 확인 안내나 플레이리스트에서 이어서 시작할 수 있습니다.') });
+      return;
+    }
+    // Other songs still waiting from separate analyses come next instead of leaving the user on the list.
+    const other = waiting.find(item => item.id !== job?.id && !item.result?.playlistId && item.result?.trackIds?.some((id: string) => id !== savedId && needsReview(id, item)));
+    const otherId = (other?.result?.trackIds as string[] | undefined)?.find(id => id !== savedId && needsReview(id, other!));
+    if (otherId) { openNext(otherId); return; }
+    setNotice('가사 시간을 저장했습니다.');
+  };
+  // LRC/SRT upload: the main process opens and parses the file, the user confirms what changes.
+  const importTimingFile = async (trackId: string) => {
+    const preview = await call('previewLyricTimingFile', { trackId }); if (!preview || preview.cancelled) return;
+    const effect = preview.lyricsEmpty ? ' 곡에 가사가 없어 파일의 가사를 곡 가사로 저장합니다.' : preview.matchesLyrics ? '' : ' 파일의 가사가 곡 가사와 달라 곡 가사도 파일 내용으로 바뀝니다.';
+    setModal({ title: `${preview.format} 가사 시간 불러오기`, confirmOnly: true, value: '', confirmLabel: '불러오기', cancelLabel: '취소', label: `「${preview.fileName}」의 ${preview.lineCount}줄 시간을 「${preview.title}」에 적용합니다.${preview.hasTiming ? ' 기존 분석과 확인한 시간은 모두 파일 내용으로 바뀝니다.' : ''}${effect}`, action: async () => {
+      const result = await call('applyLyricTimingFile', { token: preview.token });
+      // A song a waiting video asked about continues like a saved confirmation (next song or the
+      // completion popup), after this dialog has closed.
+      if (data.jobs.some(job => job.status === 'needs-confirmation' && job.result?.trackIds?.includes(trackId))) setTimeout(() => void continueAfterTiming(trackId).catch(error => setNotice(String(error instanceof Error ? error.message : error))), 0);
+      else setNotice(`가사 시간 ${result.lines}줄을 불러왔습니다.${result.lyricsReplaced ? ' 곡 가사도 파일 내용으로 바꿨습니다.' : ''}`);
+    } });
+  };
+  const resultDraft = (target: string) => draftCache.current.get(target) || data.projects.find(item => item.id === target)?.draft || {};
+  const regenerateLyricsResult = () => {
+    if (!lyricsResult || !resultProjectId) return;
+    const resultId = lyricsResult.id, target = resultProjectId;
+    void run('regenerateLyrics', async () => {
+      await call('discardLyricsResult', { id: resultId });
+      setLyricsResultId(''); flushDraft();
+      const sourceStyle = resultDraft(target).style || '';
+      ask('어떤 이야기를 노래할까요?', '주제, 분위기, 원하는 이야기를 알려 주세요', async prompt => {
+        const queued = await call('lyrics', { projectId: target, prompt, lyrics: '', currentTitle: '', style: sourceStyle, mode: 'create' });
+        lyricsOrigins.current.set(queued.jobId, target); setQueueOpen(true);
+      });
+    });
+  };
+  const reviseLyricsResult = () => {
+    if (!lyricsResult || !resultProjectId) return;
+    const resultId = lyricsResult.id, target = resultProjectId, result = lyricsResult.result;
+    flushDraft(); const sourceStyle = typeof result.style === 'string' && result.style.trim() ? result.style : resultDraft(target).style || '';
+    setLyricsResultId('');
+    ask('AI 가사 수정', '수정할 내용을 알려 주세요', async prompt => {
+      const queued = await call('lyrics', { projectId: target, prompt, lyrics: result.lyrics, currentTitle: result.title || '', style: sourceStyle, mode: 'edit' });
+      lyricsOrigins.current.set(queued.jobId, target); setQueueOpen(true);
+    }, '', () => setLyricsResultId(resultId));
+  };
+
+  const installCard = <InstallOptions rescan={() => void run('system', () => call('refreshSystem'))} recommendation={data.installationRecommendation} autoInstall={() => void run('installRecommended', async () => { await call('saveSettings', draft); const result = await call('installRecommended', { optionId: data.installationRecommendation?.optionId }); if (result?.alreadyInstalled) setNotice('추천 구성이 이미 설치되어 있습니다.'); else if (result?.activated) setNotice('추천 설치 모델을 사용하도록 변경했습니다.'); else setQueueOpen(true); })} installedEngines={data.installedEngines} options={data.installOptions} draft={draft} setDraft={setDraft} busy={busy} install={id => void run('installModel', async () => { await call('saveSettings', draft); const result = await call('installModel', { id }); if (result?.activated) setNotice('선택한 설치 모델을 사용하도록 변경했습니다.'); else setQueueOpen(true); })} />;
+  return <div className="app-shell">
+    <header className={`titlebar ${data.host?.platform === 'darwin' ? 'mac-titlebar' : ''}`}><div className="brand-mark"><img src={brandIcon} alt="Boks Music" /></div><strong>Boks Music</strong><span className="byline">by @boksajang</span><div className="titlebar-space" />{(data.codexStatus?.state !== 'missing' || !agents?.installed.claude) && <span className={`agent-badge-slot ${agents?.active === 'codex' && agents.installed.claude ? 'agent-active' : ''}`} title={agents?.active === 'codex' && agents.installed.claude ? '현재 작사 에이전트' : undefined}><CodexBadge status={data.codexStatus?.state === 'installed' && data.codexAccess?.usable === false ? { ...data.codexStatus, state: 'error', message: data.codexAccess.message } : data.codexStatus} usage={data.codexUsage} busy={!!busy} onRefresh={() => void run('codex', () => call('refreshCodex'))} /></span>}{(['installed', 'error'].includes(data.claudeStatus?.state || '') || (data.claudeStatus?.state === 'checking' && data.settings.agentProvider === 'claude')) && <span className={`agent-badge-slot ${agents?.active === 'claude' && agents.installed.codex ? 'agent-active' : ''}`}><ClaudeBadge status={data.claudeStatus} usage={data.claudeUsage} busy={claudeChecking} onRefresh={checkClaude} /></span>}<span className="engine-status-badge" role="status"><span className={`status-dot ${musicEngine?.available ? 'ready' : ''}`} /><span>{musicEngine?.available ? '음악 엔진 준비됨' : !engineRows.length ? '음악 엔진 확인 중' : '엔진 연결 필요'}</span></span>{data.host?.platform !== 'darwin' && <div className="window-controls"><button title="최소화" onClick={() => window.boks?.windowControl('minimize')}>―</button><button title="최대화 / 복원" onClick={() => window.boks?.windowControl('maximize')}>□</button><button title="닫기" className="close-window" onClick={() => window.boks?.windowControl('close')}>×</button></div>}</header>
+    <div className="app-body"><aside className="sidebar"><button className="workspace-home brand-home" onClick={() => setPage('home')} aria-label="Boks Music 홈"><svg className="home-wave" viewBox="0 0 180 80" fill="none" aria-hidden="true"><path d="M0 40h22l8-12 9 25 10-38 11 51 10-40 10 25 9-11h21l8-18 10 38 10-48 11 40 9-12h22" /></svg><img src={homeBrandIcon} alt="" /><strong>Boks Music</strong><small>당신의 공간, 당신의 음악</small></button><nav>{[['home', 'home', '홈'], ['create', 'sparkle', '만들기'], ['library', 'grid', '모든 음악'], ['imports', 'upload', '가져온 음악']].map(([id, icon, label]) => <button className={page === id ? 'selected' : ''} key={id} onClick={() => setPage(id)}><Icon name={icon} /><span>{label}</span>{id === 'create' && <span className="nav-plus">+</span>}</button>)}</nav><div className="sidebar-divider" role="separator" /><div className="sidebar-scroll"><div className="project-heading"><span>PROJECTS</span><div className="project-heading-actions"><button aria-label={projectsOpen ? '프로젝트 목록 접기' : '프로젝트 목록 펼치기'} aria-expanded={projectsOpen} onClick={() => setProjectsOpen(!projectsOpen)}><span className={`project-chevron ${projectsOpen ? 'open' : ''}`}>›</span></button><button title="프로젝트 추가" onClick={newProject}><Icon name="plus" size={16} /></button></div></div><div className="project-list" hidden={!projectsOpen}>{data.projects.map(p => <button key={p.id} className={projectId === p.id && page === 'create' ? 'current-project' : ''} onClick={() => switchProject(p.id)}><Icon name="folder" size={17} /><span>{p.name}</span><small>{data.tracks.filter(t => t.kind !== 'stem' && t.projectId === p.id).length}</small></button>)}{!data.projects.length && <button className="first-project" onClick={newProject}>첫 프로젝트 만들기 <span>+</span></button>}</div><div className="sidebar-divider" role="separator" /><div className="project-heading"><span>PLAYLISTS</span><div className="project-heading-actions"><button aria-label={playlistsOpen ? '플레이리스트 목록 접기' : '플레이리스트 목록 펼치기'} aria-expanded={playlistsOpen} onClick={() => setPlaylistsOpen(!playlistsOpen)}><span className={`project-chevron ${playlistsOpen ? 'open' : ''}`}>›</span></button><button title="플레이리스트 추가" onClick={newPlaylist}><Icon name="plus" size={16} /></button></div></div><div className="project-list playlist-list" hidden={!playlistsOpen}>{(data.playlists || []).map(item => <button key={item.id} className={page === 'playlist' && playlistId === item.id ? 'current-project' : ''} onClick={() => { setPlaylistId(item.id); setPage('playlist'); setSearch(''); }}><Icon name="queue" size={17} /><span>{item.name}</span><small>{item.trackIds.filter((id: string) => data.tracks.some(track => track.id === id && track.kind !== 'stem')).length}</small></button>)}</div><div className="sidebar-divider" role="separator" /><div className="sidebar-bottom"><button className={`videos-nav ${page === 'videos' ? 'selected' : ''}`} onClick={() => { setPage('videos'); setSearch(''); }}><Icon name="video" /><span>영상 제작</span>{videoAttention > 0 && <b title="진행 중이거나 이어서 진행할 영상">{videoAttention}</b>}</button><button className="queue-nav" onClick={() => setQueueOpen(!queueOpen)}><Icon name="queue" /><span>작업 대기열</span><b>{jobs.length}</b></button><button className={page === 'settings' ? 'selected' : ''} onClick={() => { setDraft(data.settings); setPage('settings'); }}><Icon name="settings" /><span>환경설정</span></button><button className={page === 'trash' ? 'selected' : ''} onClick={() => { setStemSourceId(''); setPage('trash'); }}><Icon name="trash" /><span>휴지통</span></button></div></div></aside>
+    <main>
+      {confirmationJobs.map(job => <div key={job.id} className="video-confirmation-banner"><button type="button" className="banner-open" onClick={() => { audio.current?.pause(); if (job.result.playlistId) setVideoPlaylistId(job.result.playlistId); else setTimingTrackId(job.result.trackIds?.[0] || ''); }}><span>{job.result.alignmentFailures?.length ? '가사 시간 분석을 마치지 못한 곡이 있습니다' : '가사 몇 줄의 시간을 확인해 주세요'}</span><small>{job.title || '플레이리스트 영상'} · {job.result.trackIds?.length || 1}곡</small><strong>{job.result.alignmentFailures?.length ? '실패 이유 · 다시 시도 →' : '음악 들으며 맞추기 →'}</strong></button><button type="button" className="secondary banner-dismiss" title="안내를 닫습니다. 확인할 줄은 곡의 LRC 확인 배지에서 이어서 맞출 수 있습니다." onClick={() => void call('dismissLyricConfirmation', { jobId: job.id }).then(() => { void refresh(); setNotice(job.result.alignmentFailures?.length ? '안내를 닫았습니다. 곡 메뉴의 가사 시간 조정에서 다시 분석할 수 있습니다.' : '안내를 닫았습니다. 확인할 줄은 곡의 LRC 확인 배지에서 이어서 맞출 수 있습니다.'); }).catch(error => setNotice(String(error instanceof Error ? error.message : error)))}>나중에</button></div>)}
+      {page === 'home' && <section className="home-page"><div className="page-heading"><div><div className="eyebrow">YOUR CREATIVE SPACE</div><h1>음악이 시작되는 나의 공간</h1><p>프로젝트를 이어가거나, 새로운 곡의 첫 문장을 적어 보세요.</p></div><button className="primary" onClick={newProject}><Icon name="plus" size={17} />새 프로젝트</button></div><section className="home-projects"><div className="home-section-heading"><h2>내 프로젝트 <span>{data.projects.length}</span></h2><button className="text-button" onClick={() => setPage('library')}>모든 음악 보기 →</button></div>{data.projects.length ? <div className="home-project-grid">{data.projects.map(item => <button className="home-project-card" key={item.id} onClick={() => switchProject(item.id)}><Icon name="folder" size={24} /><strong>{item.name}</strong><span>{data.tracks.filter(track => track.projectId === item.id && track.kind !== 'stem').length}곡</span><Icon name="arrow" size={17} /></button>)}</div> : <div className="home-empty"><Icon name="folder" size={30} /><h3>첫 프로젝트를 만들어 보세요</h3><p>가사와 음악, 모든 버전이 프로젝트에 함께 저장됩니다.</p><button className="secondary" onClick={newProject}>프로젝트 만들기</button></div>}</section><section className="home-recent"><div className="home-section-heading"><h2>최근 음악</h2><span>{data.tracks.filter(track => track.kind !== 'stem').length}곡의 아이디어</span></div>{data.tracks.some(track => track.kind !== 'stem') ? <div className="home-recent-list">{[...data.tracks].filter(track => track.kind !== 'stem').sort(newestMusicFirst).slice(0,6).map(track => <button key={track.id} className="home-recent-track" onClick={() => play(track)}><Artwork track={track} small /><span><strong>{track.title}{track.kind === 'mastered' && <em className="mastered-badge home-mastered">마스터링</em>}</strong><small>{data.projects.find(item => item.id === track.projectId)?.name || '프로젝트'}</small><small className="home-track-date">{isImportedAudio(track) ? '가져옴' : '생성'} · {trackDate(track)}</small></span><small>{time(track.duration)}</small><Icon name={active?.id === track.id && playing ? 'pause' : 'play'} size={18} /></button>)}</div> : <div className="home-empty compact"><p>첫 음악을 생성하면 이곳에서 바로 다시 들을 수 있습니다.</p><button className="text-button" onClick={() => projectId ? setPage('create') : newProject()}>음악 만들기 →</button></div>}</section></section>}
+      {(page === 'create' || page === 'library' || page === 'imports' || page === 'playlist') && <><div className="page-heading"><div><div className="eyebrow">{page === 'playlist' ? 'PLAYLIST' : page === 'imports' ? 'IMPORTED MUSIC' : page === 'library' ? 'YOUR COLLECTION' : 'PROJECT / CREATE'}</div><h1>{page === 'playlist' ? playlist?.name || '플레이리스트' : page === 'imports' ? '가져온 음악' : page === 'library' ? '모든 음악' : project?.name || '당신의 다음 곡은 여기서'}{(page !== 'create' || project) && <span className="title-count" title={`전체 ${pageTracks.length}곡`}>{pageTracks.length}곡</span>}</h1><p>{page === 'playlist' ? '프로젝트를 넘어, 함께 듣고 싶은 음악.' : page === 'imports' ? '파일과 YouTube에서 가져온 음악을 모아두었습니다.' : page === 'library' ? '모든 프로젝트의 음악을 한곳에서 만나보세요.' : '머릿속의 멜로디를, 세상에 없는 음악으로.'}</p></div><div className="page-heading-actions">{page === 'create' && project && <div className="heading-manage" role="group" aria-label="프로젝트 관리"><button className="secondary" disabled={!!busy} onClick={renameCurrentProject}>이름 변경</button><button className="secondary danger" disabled={!!busy} onClick={deleteCurrentProject}><Icon name="trash" size={15} />프로젝트 삭제</button></div>}{page === 'playlist' && playlist && <div className="heading-manage" role="group" aria-label="플레이리스트 관리"><button className="secondary" disabled={!!busy} onClick={() => ask('플레이리스트 이름 변경', '이름', name => call('renamePlaylist', { id: playlistId, name }), playlist.name)}>이름 변경</button><button className="secondary danger" disabled={!!busy} onClick={() => setModal({ title: '플레이리스트 삭제', label: '플레이리스트만 삭제합니다. 음악 파일은 유지됩니다.', value: '', confirmOnly: true, confirmLabel: '삭제', action: async () => { await call('deletePlaylist', { id: playlistId }); setPage('library'); } })}><Icon name="trash" size={15} />플레이리스트 삭제</button></div>}<button className="secondary" disabled={!!busy} onClick={importAudio}><Icon name="upload" size={17} />{busy === 'import' ? '음악 가져오는 중…' : '음악 가져오기'}</button></div></div>
+      <div className={`studio-layout ${page !== 'create' ? 'library-layout' : ''}`}>
+      {page === 'create' && <section className="composer"><div className="composer-top"><h2><Icon name="sparkle" size={18} />{parent ? 'Cover 만들기' : '새로운 음악'}</h2><div className="composer-tools">{completedLyrics.some(job => (job.projectId || lyricsOrigins.current.get(job.id)) === projectId) && <button className="text-button" onClick={() => setLyricsResultId([...completedLyrics].reverse().find(job => (job.projectId || lyricsOrigins.current.get(job.id)) === projectId)!.id)}>AI 가사 결과</button>}<span className="pill">CREATE</span></div></div>{parent && <div className="cover-source"><Icon name="music" /><div><small>원곡의 멜로디에서 시작</small><strong>{parent.title}</strong></div><button title="Cover 해제" onClick={() => switchProject(projectId)}><Icon name="close" size={16} /></button></div>}
+      <div className="composer-reset"><button className="text-button" onClick={resetComposer} disabled={!!busy} title="제목·가사·스타일과 생성 옵션 초기화">초기화</button></div>
+      <label className="field-label" htmlFor="song-title">곡 제목 <span>선택</span></label><input id="song-title" value={title} onChange={e => setTitle(e.target.value)} placeholder="이 곡에 이름을 붙여 주세요" maxLength={180} />
+      <div className="label-line"><label className="field-label" htmlFor="lyrics">가사</label><label className="toggle-label">Instrumental <input type="checkbox" checked={instrumental} onChange={e => changeInstrumental(e.target.checked)} /><span className="toggle" /></label></div>
+      {instrumental ? <><div className="instrumental-note"><Icon name="music" size={27} /><strong>가사 없는 경음악을 만듭니다</strong><span>클래식, 재즈 등 원하는 분위기를 스타일에 적어 주세요.</span></div>{!parent ? <><label className="field-label" htmlFor="instrumental-duration">목표 길이</label><select id="instrumental-duration" value={instrumentalDuration} aria-describedby="instrumental-duration-help" onChange={event => setInstrumentalDuration(Number(event.target.value))}>{[120, 180, 240, 300].map(seconds => <option key={seconds} value={seconds}>{seconds / 60}분{seconds === 180 ? ' (기본)' : ''}</option>)}</select><p className="field-help" id="instrumental-duration-help">실제 길이는 생성 결과에 따라 달라질 수 있습니다.</p></> : <p className="field-help">원곡의 악보 구성을 바탕으로 경음악 Cover를 만듭니다.</p>}</> : <div className="lyrics-box"><textarea id="lyrics" maxLength={inputUsage.lyricsLimit} aria-invalid={!instrumental && inputUsage.lyricsLength > inputUsage.lyricsLimit} aria-describedby="yue2-input-usage" value={lyrics} onChange={e => setLyrics(e.target.value)} placeholder={'당신의 이야기를 적어 주세요.\n\n[Verse]\n창밖에 흐르는 도시의 불빛…\n\n또는 AI와 함께 첫 문장을 시작해 보세요.'} /><div className="lyrics-toolbar"><button disabled={!!busy || !!lyricsAgentReason} title={lyricsAgentReason || (agents?.active ? `${agentName(agents.active)}로 작사합니다` : undefined)} onClick={() => editLyrics('create')}><Icon name="sparkle" size={14} />AI 작사</button>{lyrics && <button disabled={!!busy || !!lyricsAgentReason} title={lyricsAgentReason || undefined} onClick={() => editLyrics('rewrite')}>가사 다듬기</button>}{inputUsage.lyricsLength >= inputUsage.lyricsLimit && <small className="input-limit-count">({inputUsage.lyricsLength.toLocaleString()}/{inputUsage.lyricsLimit.toLocaleString()})</small>}</div><ResizeHandle label="가사 높이 조절" controls="lyrics" /></div>}
+      <div className="label-line"><label htmlFor="preset" className="field-label">음악 스타일 <span>{instrumental ? '경음악 전용' : '가사곡 전용'}</span></label><button className="text-button" disabled={!style.trim()} onClick={() => ask('나만의 프리셋 저장', '프리셋 이름', async name => { await call('savePreset', { name, description: '나만의 스타일', prompt: style, mode: presetMode }); })}>프리셋 저장 +</button></div><select id="preset" value={visiblePresets.some(p => p.id === presetId) ? presetId : ''} onChange={e => { setPresetId(e.target.value); const p = visiblePresets.find(p => p.id === e.target.value); if (p) { setStyle(p.prompt); setPresetPage(Math.floor(visiblePresets.indexOf(p) / 6)); } }}><option value="">{instrumental ? '경음악' : '가사곡'} 프리셋 선택</option>{presetCategories.map(category => <optgroup key={category} label={category}>{visiblePresets.filter(p => presetCategory(p) === category).map(p => <option key={p.id} value={p.id}>{p.name} — {p.description}</option>)}</optgroup>)}</select><div className="preset-browser"><div className="preset-pager"><button aria-label="이전 프리셋 페이지" disabled={shownPresetPage === 0} onClick={() => setPresetPage(shownPresetPage - 1)}><Icon name="arrow" size={15} /></button><span aria-live="polite" aria-label="프리셋 페이지">{shownPresetPage + 1} / {presetPages}</span><button aria-label="다음 프리셋 페이지" disabled={shownPresetPage >= presetPages - 1} onClick={() => setPresetPage(shownPresetPage + 1)}><Icon name="arrow" size={15} /></button></div><div className="preset-chips">{visiblePresets.slice(shownPresetPage * 6, shownPresetPage * 6 + 6).map(p => <button key={p.id} title={`${p.name} · ${p.description || presetCategory(p)}`} className={presetId === p.id ? 'chosen' : ''} onClick={() => { setPresetId(p.id); setStyle(p.prompt); }}>{p.name}</button>)}</div></div><div className="style-box"><textarea id="style-prompt" className="style-text" maxLength={inputUsage.styleLimit} aria-label="스타일 프롬프트" aria-invalid={inputUsage.styleLength > inputUsage.styleLimit} aria-describedby="yue2-input-usage" placeholder="장르, 악기, 분위기를 자유롭게 적어 주세요. 예: warm acoustic pop, soft piano, 90 BPM" value={style} onChange={e => setStyle(e.target.value)} /><ResizeHandle label="스타일 높이 조절" controls="style-prompt" /></div><div id="yue2-input-usage" className="input-usage" aria-live="polite">{inputUsage.styleLength >= inputUsage.styleLimit && <span className="input-limit-count">({inputUsage.styleLength.toLocaleString()}/{inputUsage.styleLimit.toLocaleString()})</span>}{!inputUsage.valid && <p className="input-limit-count">{inputUsage.message || '입력량을 줄이면 생성할 수 있습니다. 원문은 유지됩니다.'}</p>}</div>
+      <div className="form-columns generation-options"><div><label className="field-label" htmlFor="count">생성 개수</label><select id="count" value={count} onChange={e => setCount(Number(e.target.value))}>{[1, 2, 3, 4].map(n => <option key={n} value={n}>{n}곡</option>)}</select></div></div>
+      {parent && <p className="field-help">원곡의 멜로디를 분석해 새로운 스타일로 생성합니다. 현재 엔진이 지원하지 않는 강도 조절은 제공하지 않습니다.</p>}
+      <button className="generate-button" disabled={!!busy || !projectId || !inputUsage.valid || !style.trim() || (!instrumental && !lyrics.trim())} onClick={() => void generate()}><Icon name="sparkle" />{busy === 'generate' ? '작업 준비 중…' : parent ? '새로운 Cover 생성' : '음악 생성하기'}<Icon name="arrow" size={18} /></button><p className="generate-note">{!projectId ? '먼저 왼쪽에서 프로젝트를 만들어 주세요.' : '프로젝트에 자동 저장됩니다'}</p></section>}
+      <section className="results">
+      {page === 'playlist' && playlist && <div className="playlist-tools"><button className="secondary playlist-video-button" disabled={!!busy || !tracks.length} onClick={() => { audio.current?.pause(); setVideoPlaylistId(playlistId); }}>플레이리스트 영상 만들기</button><button className="primary" disabled={!tracks.length} onClick={() => startPlayback(tracks.map(track => track.id))}>전체 재생</button><button className="secondary" disabled={!selectedTracks.length} onClick={() => startPlayback(tracks.filter(track => selectedTracks.includes(track.id)).map(track => track.id))}>선택 재생</button></div>}
+      {!!pageTracks.length && <div className="track-selection-toolbar"><label><input type="checkbox" aria-label="음악 전체 선택" checked={!!tracks.length && tracks.every(track => selectedTracks.includes(track.id))} disabled={!!busy || !tracks.length} onChange={event => setSelectedTracks(event.target.checked ? tracks.map(track => track.id) : [])} />전체 선택 <span>{selectedTracks.length ? `${selectedTracks.length}곡 선택` : ''}</span></label>{page === 'playlist' && !!selectedTracks.length && <button className="secondary toolbar-remove" disabled={!!busy} onClick={() => removeFromCurrentPlaylist(selectedTracks)}>목록에서 제외</button>}{!!selectedTracks.length && <div className="track-batch-controls" title="음악과 연결된 Stem을 선택한 프로젝트로 이동합니다. 파일의 저장 위치는 유지됩니다."><select aria-label="선택 음악 작업" value={batchAction} disabled={!!busy} onChange={event => setBatchAction(event.target.value)}><option value="move">프로젝트로 이동</option><option value="playlist">플레이리스트 추가</option><option value="trash">휴지통으로 이동</option></select>{batchAction === 'playlist' && <select aria-label="추가할 플레이리스트" value={targetPlaylist} disabled={!!busy} onChange={event => setTargetPlaylist(event.target.value)}><option value="">플레이리스트 선택</option>{(data.playlists || []).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select>}{batchAction === 'move' && <select aria-label="이동할 프로젝트" value={targetProject} disabled={!!busy} onChange={event => setTargetProject(event.target.value)}><option value="">프로젝트 선택</option>{data.projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select>}<button className="secondary" disabled={!!busy || (batchAction === 'move' && !targetProject) || (batchAction === 'playlist' && !targetPlaylist)} onClick={applyBatchAction}>{batchAction === 'playlist' ? '추가' : '이동'}</button></div>}<input className="track-search" aria-label="음악 검색" placeholder="음악 검색…" value={search} onChange={e => setSearch(e.target.value)} />{!!selectedTracks.length && batchAction === 'move' && <p className="batch-move-help">음악과 연결된 Stem을 선택한 프로젝트로 이동합니다. 파일의 저장 위치는 유지됩니다.</p>}</div>}
+      {jobs.length > 0 && <button className="active-job-banner" onClick={() => setQueueOpen(true)}><span className="live-dot" /><span>{jobStageLabel(jobs.find(j => j.status === 'running')?.stage) || '다음 작업을 기다리고 있습니다'}</span><b>{jobs.length}개 작업</b><Icon name="arrow" size={17} /></button>}
+      {!loaded ? <div className="empty-state"><Icon name="music" size={38} /><h3>프로젝트를 불러오는 중…</h3></div> : !tracks.length ? <div className="empty-state"><div className="empty-record"><span /><Icon name="music" size={33} /></div><span className="eyebrow">A BLANK CANVAS FOR YOUR SOUND</span><h3>{search ? '검색 결과가 없습니다' : page === 'playlist' ? '아직 담긴 음악이 없습니다' : page === 'imports' ? '가져온 음악이 없습니다' : '아직 쓰이지 않은 당신의 음악'}</h3><p>{search ? '다른 제목이나 스타일로 검색해 보세요.' : page === 'playlist' ? '모든 음악이나 프로젝트에서 곡을 선택하고 플레이리스트에 추가해 주세요.' : page === 'imports' ? '음악 가져오기를 눌러 파일을 추가해 주세요.' : <>스타일을 고르고, 이야기를 더해 보세요.<br />첫 번째 음악이 이곳에 쌓이기 시작합니다.</>}</p>{!projectId && <button className="secondary" onClick={newProject}><Icon name="plus" size={16} />첫 프로젝트 만들기</button>}{!['imports','playlist'].includes(page) && <div className="empty-tags"><span>나만의 스타일</span><span>무한한 이야기</span><span>새로운 사운드</span></div>}</div> : <div className={['imports','playlist'].includes(page) ? 'track-grid imports-list' : 'track-grid'}>{tracks.map(track => <article className={`track-card ${active?.id === track.id ? 'active-track' : ''}`} key={track.id} data-track-id={track.id}><input className="track-select" type="checkbox" aria-label={`${track.title} 선택`} disabled={!!busy} checked={selectedTracks.includes(track.id)} onChange={event => setSelectedTracks(ids => event.target.checked ? [...ids, track.id] : ids.filter(id => id !== track.id))} /><div className="track-art"><Artwork track={track} /><button className="card-play" title={active?.id === track.id && playing ? '일시정지' : '재생'} onClick={() => play(track)}><Icon name={active?.id === track.id && playing ? 'pause' : 'play'} size={23} /></button><span className="track-kind">{track.kind === 'mastered' ? 'MASTERED' : isImportedAudio(track) ? '가져온 음악' : track.kind === 'cover' ? 'COVER' : track.kind === 'stem' ? 'STEM' : track.instrumental ? 'INSTRUMENTAL' : 'ORIGINAL'}</span><span className="track-duration" aria-label={`곡 길이 ${time(track.duration)}`}>{time(track.duration)}</span></div><div className="track-info"><h3><button className="track-title" title={track.title} aria-label={`${track.title} 상세 보기`} onClick={() => openDetails(track.id)}>{track.title}</button></h3>{page === 'playlist' ? <div className="track-badges" title={track.style && !isImportedAudio(track) ? track.style : undefined}>{trackBadges(track).map(badge => <span key={badge.label} className={`source-badge ${badge.tone}`}>{badge.label}</span>)}</div> : <p title={track.style === '가져온 오디오' ? '가져온 음악' : track.style}>{track.style === '가져온 오디오' ? '가져온 음악' : track.style || '가져온 음악'}</p>}{active?.id === track.id && <input className="card-seek" aria-label={`${track.title} 재생 위치`} type="range" min="0" max={duration || 1} step=".1" value={position} onChange={e => seek(e.target.value)} />}<div className="lineage" aria-hidden={(page === 'playlist' || (track.kind !== 'mastered' && !isImportedAudio(track))) && (track.kind !== 'cover' || !track.parentId) && !track.lyricState}>{page !== 'playlist' && track.kind === 'mastered' ? <span className="source-badge mastered-badge">마스터링</span> : page !== 'playlist' && isImportedAudio(track) ? <span className="source-badge imported-badge">가져온 음악</span> : track.kind === 'cover' && track.parentId && <><span className="source-badge">원곡</span><span className="source-title">{data.tracks.find(t => t.id === track.parentId)?.title || '원곡 정보 없음'}</span></>}<LrcBadge track={track} open={() => { audio.current?.pause(); setTimingTrackId(track.id); }} /></div><time className="track-date" dateTime={track.importedAt || track.createdAt} title={trackDate(track)}>{isImportedAudio(track) ? '가져옴' : '생성'} · {trackDate(track)}{['imports','playlist'].includes(page) && ` · ${time(track.duration)} · ${data.projects.find(item => item.id === track.projectId)?.name || '프로젝트'}`}</time><div className="track-actions">{data.tracks.some(t => t.kind === 'stem' && t.parentId === track.id) &&<button className="stem-badge" onClick={() => { setStemChoose(false); setStemSourceId(track.id); }}>STEM</button>}{page !== 'playlist' && <button onClick={() => cover(track)}>Cover <Icon name="arrow" size={14} /></button>}<details name="track-actions" onToggle={event => {
+        const details = event.currentTarget; if (!details.open) return;
+        const menu = details.querySelector<HTMLElement>('.track-menu'); if (!menu) return;
+        const anchor = details.getBoundingClientRect(); const bounds = details.closest('main')!.getBoundingClientRect();
+        const below = Math.min(bounds.bottom, window.innerHeight) - anchor.bottom - 12;
+        const above = anchor.top - Math.max(bounds.top, 0) - 12;
+        const up = below < menu.scrollHeight && above > below;
+        menu.style.top = up ? 'auto' : 'calc(100% + 8px)';
+        menu.style.bottom = up ? 'calc(100% + 8px)' : 'auto';
+        menu.style.maxHeight = `${Math.max(60, up ? above : below)}px`;
+      }}><summary aria-label={`${track.title} 더 보기`}>•••</summary><div className="track-menu"><button onClick={() => setTextTrackId(track.id)}>제목·가사 수정</button><button onClick={() => { audio.current?.pause(); setTimingTrackId(track.id); }}>가사 시간 조정</button><button onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void run('timing-file', () => importTimingFile(track.id)); }}>LRC/SRT 업로드</button>{page !== 'playlist' && <><button onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); setMasteringOptions(masteringDefaults); setMasteringTrack(track); }}>마스터링</button><button onClick={() => { setStemChoose(true); setStemSourceId(track.id); }}>Stem 추출</button></>}<button disabled={!!imageReason} title={imageReason || undefined} onClick={() => void run('art', () => call('albumArt', { trackId: track.id }))}>앨범아트 생성 / 재생성</button>{page !== 'playlist' && <button onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); openPlaylistPicker([track.id]); }}>플레이리스트에 추가</button>}<button onClick={() => void run('reveal', () => call('revealTrack', { id: track.id }))}>파일 위치 열기</button><button onClick={() => void run('export', () => call('exportTrack', { id: track.id }))}>내보내기</button>{page === 'playlist' && <button className="danger" onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); removeFromCurrentPlaylist([track.id]); }}>플레이리스트에서 제거</button>}{page !== 'playlist' && <button className="danger" onClick={() => setModal({ title: '휴지통으로 이동', confirmLabel: '휴지통으로 이동', label: `「${track.title}」을 휴지통으로 이동하시겠습니까?`, value: '', confirmOnly: true, action: async () => { await call('deleteTrack', { id: track.id }); if (active?.id === track.id) setActive(null); if (detailId === track.id) setDetailId(''); } })}>휴지통으로 이동</button>}</div></details></div></div></article>)}</div>}</section></div></>}
+      {page === 'videos' && <VideoLibrary data={data} busy={!!busy} pauseMusic={() => audio.current?.pause()} openQueue={() => setQueueOpen(true)} openMaker={id => { audio.current?.pause(); setVideoPlaylistId(id); }}
+        reveal={video => run('reveal-video', () => call('revealVideo', { id: video.id }))}
+        cancel={job => setModal({ title: '영상 제작 취소', confirmOnly: true, value: '', confirmLabel: '제작 취소', cancelLabel: '닫기', label: `「${job.title}」 제작을 취소합니다. 저장한 가사 시간은 그대로 남고, 같은 플레이리스트로 언제든 다시 만들 수 있습니다.`, action: async () => { await call('cancelJob', { id: job.id }); setNotice('영상 제작을 취소했습니다.'); } })} />}
+      {page === 'trash' && <section className="trash-page"><div className="page-heading"><div><div className="eyebrow">TRASH</div><h1>휴지통</h1><p>곡을 복원하거나 완전히 삭제할 수 있습니다. 관련 Stem은 곡과 함께 관리됩니다.</p></div></div>{trashTracks.length ? <><div className="trash-toolbar"><label><input type="checkbox" aria-label="휴지통 전체 선택" checked={selectedTrash.length === trashTracks.length} onChange={event => setSelectedTrash(event.target.checked ? trashTracks.map(track => track.id) : [])} disabled={!!busy} />전체 선택 <span>{selectedTrash.length} / {trashTracks.length}</span></label><div className="trash-toolbar-actions"><button className="secondary" disabled={!!busy || !selectedTrash.length} onClick={() => restoreTracks(selectedTrash)}>선택 복원</button><button className="secondary danger" disabled={!!busy || !selectedTrash.length} onClick={() => purgeTrash(selectedTrash)}>선택 완전 삭제</button></div></div><div className="trash-list">{trashTracks.map(track => <article className="trash-row" key={track.id} data-trash-id={track.id}><input type="checkbox" aria-label={`${track.title} 선택`} checked={selectedTrash.includes(track.id)} disabled={!!busy} onChange={event => setSelectedTrash(ids => event.target.checked ? [...ids, track.id] : ids.filter(id => id !== track.id))} /><Artwork track={track} small /><div className="trash-track-info"><h3 title={track.title}>{track.title}</h3><p><LrcBadge track={track} />{data.projects.find(project => project.id === track.projectId)?.name || '삭제된 프로젝트'} ·{track.trashedAt ? new Date(track.trashedAt).toLocaleDateString('ko-KR') : '삭제된 곡'}</p></div><div className="trash-row-actions"><button className="secondary" disabled={!!busy || !track.audioUrl} aria-label={`${track.title} ${active?.id === track.id && playing ? '일시정지' : '재생'}`} onClick={() => play(track)}><Icon name={active?.id === track.id && playing ? 'pause' : 'play'} size={16} /></button><button className="secondary" disabled={!!busy} onClick={() => restoreTracks([track.id])}>복원</button><button className="secondary danger" disabled={!!busy} onClick={() => purgeTrash([track.id])}>완전 삭제</button></div></article>)}</div></> : <div className="empty-state trash-empty"><Icon name="trash" size={38} /><h3>휴지통이 비어 있습니다</h3><p>삭제한 곡은 이곳에서 확인할 수 있습니다.</p></div>}</section>}
+      {page === 'settings' && <section className="settings-page"><div className="page-heading"><div><div className="eyebrow">STUDIO SETTINGS</div><h1>환경설정</h1><p>작업 환경을 한 번 준비하고, 음악에 집중하세요.</p></div><button className="primary" disabled={!!busy} onClick={() => void run('settings', async () => { await call('saveSettings', draft); setNotice('환경설정을 저장했습니다.'); })}>설정 저장 <Icon name="check" size={17} /></button></div><div className="settings-grid">{installCard}<div className="settings-column"><AgentSettings data={data} draft={draft} setDraft={setDraft} busy={!!busy} refreshModels={() => void run('models', () => call('refreshModels'))} installImage={variantId => run('image-install', async () => { await call('installImageModel', { variantId }); setQueueOpen(true); setNotice('로컬 이미지 모델 설치를 시작했습니다. 진행 상황은 작업 대기열에서 볼 수 있습니다.'); })} /></div><div className="settings-column"><section className="settings-panel"><h2>음악</h2><label className="field-label">기본 생성 개수</label><select value={draft.defaultCount || 1} onChange={e => setDraft({ ...draft, defaultCount: Number(e.target.value) })}>{[1, 2, 3, 4].map(n => <option key={n} value={n}>{n}곡</option>)}</select><label className="setting-check" title={imageReason || undefined}><input type="checkbox" checked={!!draft.autoAlbumArt && !imageReason} disabled={!!imageReason} onChange={e => setDraft({ ...draft, autoAlbumArt: e.target.checked })} /><span>음악 생성 후 앨범아트 자동 생성</span></label>{imageReason && <p className="field-help">{imageReason}</p>}</section><section className="settings-panel"><h2>저장 공간</h2>{[['projectPath', '프로젝트 저장 위치'], ['modelPath', '모델 저장 위치']].map(([key, label]) => <div key={key}><label className="field-label" htmlFor={key}>{label}</label><div className="storage-location"><input id={key} value={key === 'modelPath' ? data.settings.modelPath || '' : draft[key] || ''} readOnly placeholder="앱 기본 위치" />{key === 'projectPath' && <button className="secondary" disabled={!!busy} onClick={() => void run('folder', async () => { const chosen = await call('pickProjectFolder'); if (chosen) setDraft(current => ({ ...current, projectPath: chosen })); })}><Icon name="folder" size={16} />폴더 선택</button>}</div>{key === 'modelPath' ? <p className="field-help">모든 모델과 필수 패키지는 프로젝트의 engine-packages 폴더에 설치됩니다.</p> : <p className="field-help">변경한 위치는 새 프로젝트에 적용됩니다. 기존 프로젝트는 원래 위치에 유지됩니다.</p>}</div>)}</section></div><div className="settings-column"><section className="settings-panel"><h2>엔진 & 모델</h2><p>설치와 연결 상태를 확인하세요. 연결되지 않은 기능은 결과를 생성하지 않습니다.</p><div className="engine-list">{engineRows.map(e => <div className="engine-row" key={e.id}><span className={`status-dot ${e.available ? 'ready' : ''}`} /><div><strong>{e.name || e.id}</strong><small>{e.message || e.reason || e.status || '상태 확인 필요'}</small></div><span className="pill">{e.available ? '준비됨' : e.status || '미연결'}</span></div>)}<div className="engine-row"><span className={`status-dot ${data.videoInstallation?.available ? 'ready' : ''}`} /><div><strong>HyperFrames</strong><small>{data.videoInstallation?.version ? `${data.videoInstallation.version} · ` : ''}가사 영상 렌더링과 출력 · 이 PC의 영상 인코더 자동 적용</small></div><span className="pill">{data.videoInstallation?.available ? '준비됨' : '설치 필요'}</span></div></div></section></div><div className="settings-column"><section className="settings-panel"><h2>가사 인식과 시간 맞추기</h2><p>가사를 기준으로 맞춘 시작점을 노래 인식 결과와 대조해, 두 결과가 어긋나지 않는 줄만 자동으로 확정합니다. 직접 맞춘 시작점은 보존합니다.</p><div className="engine-list">{(data.lyricInstallation?.models || []).map((model: Row) => <div className="engine-row" key={model.id}><span className={`status-dot ${model.installed && data.lyricInstallation?.runtimeReady ? 'ready' : ''}`} /><div><strong>{model.name}</strong><small>{model.role}{model.version ? ` · ${String(model.version).slice(0, 8)}` : ''}</small>{!(model.installed && data.lyricInstallation?.runtimeReady) && model.message && <small>{model.message}</small>}</div><span className="pill">{model.installed ? data.lyricInstallation?.runtimeReady ? '설치 완료' : '실행 환경 준비 필요' : '설치 필요'}</span></div>)}</div><p className="field-help">YuE2 자동 설치에 함께 포함됩니다. 모든 모델은 프로젝트 안에 저장됩니다.</p></section></div><section className="settings-panel wide system-panel"><h2>시스템</h2><dl className="system-data">{Object.entries(data.system).filter(([key]) => key !== 'codexModels').filter(([key]) => !(key === 'vramMB' && data.system.vram)).map(([key, value]) => <div key={key}><dt>{systemLabels[key] || key}</dt><dd>{typeof value === 'object' ? JSON.stringify(value) : String(value ?? '확인 불가')}</dd></div>)}</dl></section></div></section>}
+    </main>
+    {detailTrack && <aside className="track-detail" aria-label="곡 상세 정보" key={detailTrack.id}>
+      <div className="detail-heading"><span className="eyebrow">SONG DETAILS</span><button title="곡 상세 닫기" onClick={() => setDetailId('')}><Icon name="close" /></button></div>
+      <div className="detail-artwork"><Artwork track={detailTrack} />{detailTrack.artUrl && <button className="art-download" title="앨범아트 다운로드" aria-label="앨범아트 다운로드" disabled={!!busy} onClick={() => void run('art-export', async () => { const result = await call('exportAlbumArt', { id: detailTrack.id }); if (!result.cancelled) setNotice('선택한 폴더에 앨범아트를 저장했습니다.'); })}><Icon name="download" size={17} /></button>}</div>
+      <h2 className="detail-title">{detailTrack.title}</h2>
+      <span className="detail-duration">{time(detailTrack.duration)} · {detailTrack.kind === 'mastered' ? 'Mastered · 마스터링' : detailTrack.kind === 'cover' ? 'Cover' : detailTrack.instrumental ? 'Instrumental' : 'Song'}</span>
+      {detailTrack.kind === 'mastered' && <section className="detail-mastering"><h3>마스터링 결과</h3><p>원곡 · {data.tracks.find(track => track.id === detailTrack.masteringFromId)?.title || detailTrack.masteringSourceTitle || '원곡 정보 없음'}</p>{detailTrack.metadata?.mastering?.options && <p className="mastering-target">요청 목표 · {detailTrack.metadata.mastering.options.targetLufs} LUFS / {detailTrack.metadata.mastering.options.truePeak} dBTP</p>}{detailTrack.metadata?.mastering?.achievedTarget === false && <p className="mastering-measurement-note">피크 상한을 유지한 실제 음량입니다.</p>}{detailTrack.metadata?.mastering && <table><thead><tr><th>측정값</th><th>원본</th><th>결과</th></tr></thead><tbody>{[['integratedLufs','음량','LUFS'],['truePeakDbtp','최대 피크','dBTP'],['loudnessRange','다이내믹 범위','LU']].map(([key,label,unit]) => <tr key={key}><th>{label}</th>{['before','after'].map(stage => <td key={stage}>{typeof detailTrack.metadata.mastering[stage]?.[key] === 'number' && Number.isFinite(detailTrack.metadata.mastering[stage][key]) ? `${detailTrack.metadata.mastering[stage][key].toFixed(1)} ${unit}` : '—'}</td>)}</tr>)}</tbody></table>}</section>}
+      <time className="detail-date" dateTime={detailTrack.importedAt || detailTrack.createdAt}>{isImportedAudio(detailTrack) ? '가져옴' : '생성'} · {trackDate(detailTrack)}</time><section className="detail-section"><div className="detail-section-heading"><h3>Style</h3><button className="copy-text" title="Style 복사" aria-label="Style 복사" disabled={!detailTrack.style?.trim()} onClick={() => void copyText(detailTrack.style, 'Style')}><Icon name="copy" size={16} /><span>복사</span></button></div><p>{detailTrack.style === '가져온 오디오' ? '가져온 음악' : detailTrack.style || '등록된 스타일이 없습니다.'}</p></section>
+      {detailTrack.kind === 'cover' && detailTrack.parentId && <section className="detail-section"><h3>Cover 원곡</h3>{sourceTrack ? <button className="detail-source" onClick={() => openDetails(sourceTrack.id)}><Artwork track={sourceTrack} small /><span>{sourceTrack.title}</span><Icon name="arrow" size={16} /></button> : <p>원곡 정보를 찾을 수 없습니다.</p>}</section>}
+      <section className="detail-section detail-lyrics"><div className="detail-section-heading"><h3>가사<LrcBadge track={detailTrack} open={() => { audio.current?.pause(); setTimingTrackId(detailTrack.id); }} /></h3><button className="copy-text" title="가사 복사" aria-label="가사 복사" disabled={!detailTrack.lyrics?.trim()} onClick={() => void copyText(detailTrack.lyrics, '가사')}><Icon name="copy" size={16} /><span>복사</span></button></div><p>{detailTrack.lyrics?.trim() || (detailTrack.instrumental ? '가사 없는 연주곡입니다.' : '등록된 가사가 없습니다.')}</p></section>
+    </aside>}
+    </div>
+    <footer className="global-player"><audio ref={audio} src={active?.audioUrl} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => stepPlayback(1, true)} onTimeUpdate={syncPlayback} onLoadedMetadata={syncPlayback} onDurationChange={syncPlayback} onSeeked={syncPlayback} onError={() => active && setNotice('오디오 파일을 읽을 수 없습니다. 파일 위치를 확인해 주세요.')} /><div className="player-song"><Artwork track={currentActive || undefined} small /><div><strong>{currentActive?.title || '당신의 음악을 기다리고 있어요'}</strong><small>{currentActive?.style || '음악을 선택하면 여기에서 재생됩니다'}</small></div></div><div className="player-center"><button className="player-skip" title="이전 곡" disabled={!playbackQueue} onClick={() => stepPlayback(-1)}>‹</button><button className="global-play" title={playing ? '일시정지' : '재생'} disabled={!active} onClick={() => active && play(active, true)}><Icon name={playing ? 'pause' : 'play'} size={20} /></button><button className="player-skip" title="다음 곡" disabled={!playbackQueue} onClick={() => stepPlayback(1)}>›</button><span>{time(position)}</span><input aria-label="재생 위치" type="range" min="0" max={duration || 1} step=".1" value={position} disabled={!active} onChange={e => seek(e.target.value)} /><span>{time(duration)}</span></div><button className="playback-queue-toggle" title="재생 목록 열기" onClick={openPlayback}><Icon name="queue" size={19} /></button><div className="player-volume"><Icon name="volume" size={18} /><input aria-label="볼륨" type="range" min="0" max="1" step=".01" value={volume} onChange={e => setVolume(Number(e.target.value))} /></div></footer>
+    {previewVideo && <aside className="queue-panel video-result-panel" aria-label="완성 영상"><div className="queue-title"><div><span className="eyebrow">YOUR VIDEO</span><h2>완성 영상</h2></div><button title="완성 영상 닫기" onClick={() => setVideoPreviewId('')}><Icon name="close" /></button></div><video src={previewVideo.videoUrl} controls preload="metadata"/><h3>{previewVideo.title}</h3></aside>}
+    {playbackOpen && <aside className="queue-panel playback-panel" aria-label="재생 목록"><div className="queue-title"><div><span className="eyebrow">NOW PLAYING</span><h2>재생 목록</h2></div><button title="재생 목록 닫기" onClick={() => setPlaybackOpen(false)}><Icon name="close" /></button></div><div className="playback-options"><label>재생 순서<select aria-label="재생 순서" value={shuffle ? 'shuffle' : 'sequential'} onChange={event => { const enabled = event.target.value === 'shuffle'; setShuffle(enabled); if (playbackQueue) setPlaybackQueue(setQueueShuffle(playbackQueue, enabled)); }}><option value="sequential">순서대로</option><option value="shuffle">셔플</option></select></label><label>반복 재생<select aria-label="반복 재생" value={repeat} onChange={event => { const value = event.target.value as 'off' | 'all' | 'one'; setRepeat(value); if (playbackQueue) setPlaybackQueue({ ...playbackQueue, repeat: value }); }}><option value="off">반복 안 함</option><option value="all">전체 반복</option><option value="one">한 곡 반복</option></select></label></div><p className="queue-summary">{playbackQueue?.order.length || 0}곡</p>{!playbackQueue && <div className="queue-empty">플레이리스트에서 전체 또는 선택 재생을 시작하세요.</div>}<div className="playback-entries">{playbackQueue?.order.map((id, index) => { const track = data.tracks.find(item => item.id === id); return track && <button key={id} className={active?.id === id ? 'current' : ''} aria-label={`${track.title} 목록 재생`} onClick={() => { const queue = selectQueueTrack(playbackQueue, id); setPlaybackQueue(queue); playQueued(queue); }}><span>{index + 1}</span><Artwork track={track} small /><div><strong>{track.title}</strong><small>{data.projects.find(item => item.id === track.projectId)?.name || '프로젝트'}</small></div><small>{time(track.duration)}</small></button>; })}</div></aside>}
+    {queueOpen && <aside className="queue-panel"><div className="queue-title"><div><span className="eyebrow">JOB QUEUE</span><h2>작업 대기열</h2></div><button title="대기열 닫기" onClick={() => setQueueOpen(false)}><Icon name="close" /></button></div><p className="queue-summary">진행 / 대기 {jobs.length}개</p>{!jobs.length && <div className="queue-empty">대기 중이거나 진행 중인 작업이 없습니다.</div>}{jobs.map(j => <article className="job-card" key={j.id}><div><strong>{j.title || j.type || '음악 작업'}</strong><span className={`job-status ${j.status}`}>{({ running: '진행 중', queued: '대기', completed: '완료', failed: '실패', cancelled: '취소됨' } as Row)[j.status] || j.status}{j.status === 'running' && <i className="job-spinner" aria-hidden="true" />}</span></div><p>{jobStageLabel(j.stage) || '작업 대기 중'}</p>{j.total > 1 && <p>전체 생성 {data.jobs.filter(item => item.batchId === j.batchId && item.status === 'completed').length} / {j.total}곡 완료</p>}{typeof j.progress === 'number' && <div className="real-progress"><progress max="100" value={j.progress} /><span>{Math.round(j.progress)}%</span></div>}{j.error && <p className="job-error">{j.error}</p>}<div className="job-meta"><span>{j.index && j.total > 1 ? `${j.index} / ${j.total}곡` : ''}{j.status !== 'queued' && <>{j.index && j.total > 1 ? ' · ' : ''}경과 {time(Math.max(0, ((j.finishedAt ? new Date(j.finishedAt).getTime() : clock) - new Date(j.startedAt || j.createdAt).getTime()) / 1000))}</>}</span>{['running', 'queued'].includes(j.status) && <button onClick={() => void run('cancel', () => call('cancelJob', { id: j.id }))}>취소</button>}</div></article>)}</aside>}
+    {stemSource && <StemPopup key={stemSource.id} initialChoose={stemChoose} extract={async stemMode => { await call('stems', { trackId: stemSource.id, stemMode }); await refresh(); setStemSourceId(''); setQueueOpen(true); }} source={stemSource} stems={stemRows} close={() => setStemSourceId('')} download={async (ids, single) => { await run('stem-export', async () => { const result = single ? await call('exportTrack', { id: ids[0] }) : await call('exportStems', { parentId: stemSource.id, ids }); if (single ? result : !result.cancelled) setNotice('Stem 다운로드를 완료했습니다.'); }); }} />}
+    {lyricsResult && <div className="modal-backdrop" onClick={() => !busy && setLyricsResultId('')}><section className="modal lyrics-result-modal" role="dialog" aria-modal="true" aria-labelledby="lyrics-result-heading" onClick={event => event.stopPropagation()}><div className="modal-title"><div><span className="eyebrow">AI LYRICS</span><h2 id="lyrics-result-heading">완성된 가사를 확인하세요</h2></div><button title="가사 결과 닫기" disabled={!!busy} onClick={() => setLyricsResultId('')}><Icon name="close" /></button></div><label className="field-label" htmlFor="lyrics-result-select">가사 결과</label><select id="lyrics-result-select" disabled={!!busy} value={lyricsResultId} onChange={event => setLyricsResultId(event.target.value)}>{[...completedLyrics].reverse().map(job => <option key={job.id} value={job.id}>{data.projects.find(item => item.id === (job.projectId || lyricsOrigins.current.get(job.id)))?.name || '프로젝트'} · {job.title} · {new Date(job.finishedAt || job.createdAt).toLocaleString('ko-KR')}</option>)}</select><label className="field-label" htmlFor="lyrics-result-title">곡 제목</label><input id="lyrics-result-title" readOnly value={lyricsResult.result.title || '제목 없음'} /><textarea readOnly aria-label="완성된 AI 가사" value={lyricsResult.result.lyrics} /><label className="field-label" htmlFor="lyrics-result-style">음악 스타일</label><textarea id="lyrics-result-style" readOnly value={lyricsResult.result.style || '스타일 없음 · 기존 스타일 유지'} style={{ height: 86, minHeight: 86 }} /><p className="field-help">적용하면 ‘{data.projects.find(item => item.id === resultProjectId)?.name || '원래 프로젝트'}’에 결과의 제목·가사·스타일을 함께 적용합니다. 제목이나 스타일이 없는 이전 결과는 해당 기존 입력을 유지합니다.</p><div className="modal-buttons"><button className="secondary" disabled={!!busy} onClick={() => setLyricsResultId('')}>나중에</button><button className="secondary" disabled={!!busy || !resultProjectId} title="이 AI 결과를 삭제한 뒤 새 작사 주제를 입력합니다. 적용된 프로젝트 가사는 유지됩니다." onClick={regenerateLyricsResult}>삭제 후 새로 생성</button><button className="secondary" disabled={!!busy || !resultProjectId} onClick={reviseLyricsResult}>AI 수정</button><button className="primary" disabled={!!busy || !resultProjectId} onClick={() => void run('applyLyrics', async () => { const target = resultProjectId!; flushDraft(); const saved = resultDraft(target); const next = { ...saved, ...(typeof lyricsResult.result.title === 'string' && lyricsResult.result.title.trim() ? { title: lyricsResult.result.title.trim() } : {}), lyrics: lyricsResult.result.lyrics, ...(typeof lyricsResult.result.style === 'string' && lyricsResult.result.style.trim() ? { style: lyricsResult.result.style.trim(), presetId: '' } : {}) }; await call('saveDraft', { projectId: target, draft: next }); draftCache.current.set(target, next); draftProject.current = target; setLoadedProject(target); setProjectId(target); setParent(null); setTitle(next.title || ''); setLyrics(next.lyrics); setStyle(next.style || ''); setPresetId(next.presetId || ''); setInstrumental(!!next.instrumental); setInstrumentalDuration(durationChoice(next.instrumentalDuration)); setCount(next.count || data.settings.defaultCount || 1); setPage('create'); setLyricsResultId(''); setNotice('제목·가사·스타일을 적용했습니다.'); })}>현재 가사 적용</button></div></section></div>}
+    {notice && <div className="toast" role="status"><span>{notice}</span></div>}
+    {loaded && agents?.needsChoice && <AgentChoiceDialog data={data} busy={busy === 'chooseAgent'} choose={id => void run('chooseAgent', async () => { await call('chooseAgent', { provider: id }); setDraft(current => ({ ...current, agentProvider: id, agentChoiceConfirmed: true })); setNotice(`${agentName(id)}를 기본 AI 에이전트로 설정했습니다.`); })} />}
+    {videoPlaylistId && data.playlists?.some(item => item.id === videoPlaylistId) && <VideoMaker key={videoPlaylistId} playlist={data.playlists.find(item => item.id === videoPlaylistId)!} tracks={data.tracks} videos={data.videos || []} jobs={data.jobs} call={call} close={() => setVideoPlaylistId('')} edit={id => setTextTrackId(id)} review={id => { audio.current?.pause(); setTimingTrackId(id); }} importTiming={importTimingFile} align={async id => { const result = await call('alignLyrics', { trackId: id }); alignmentOrigins.current.set(result.jobId, id); await refresh(); setNotice('가사 시간 분석을 시작했습니다.'); }} enqueued={() => { void refresh(); setQueueOpen(true); }} />}
+    {textTrackId && data.tracks.some(track => track.id === textTrackId) && <TrackTextEditor key={textTrackId} track={data.tracks.find(track => track.id === textTrackId)!} close={() => setTextTrackId('')} save={async (title, lyrics, analyze) => { await call('updateTrackText', { id: textTrackId, title, lyrics }); await refresh(); if (analyze) { const result = await call('alignLyrics', { trackId: textTrackId }); alignmentOrigins.current.set(result.jobId, textTrackId); await refresh(); setQueueOpen(true); } else setNotice('제목과 가사를 저장했습니다.'); }} />}
+    {timingTrackId && data.tracks.some(track => track.id === timingTrackId) && <LyricTimingReview key={timingTrackId} track={data.tracks.find(track => track.id === timingTrackId)!} close={() => { const closing = timingTrackId; setTimingTrackId(current => current === closing ? '' : current); }} save={async (cues, expectedLyrics) => { const savedId = timingTrackId; await call('saveLyricTiming', { id: savedId, cues, expectedLyrics }); await continueAfterTiming(savedId); }} analyze={async () => { const result = await call('alignLyrics', { trackId: timingTrackId }); alignmentOrigins.current.set(result.jobId, timingTrackId); await refresh(); setQueueOpen(true); }} />}
+    {masteringTrack && <div className="modal-backdrop" onClick={() => !busy && setMasteringTrack(null)}><section className="modal mastering-modal" role="dialog" aria-modal="true" aria-labelledby="mastering-heading" onClick={event => event.stopPropagation()}><div className="mastering-glow" /><div className="modal-title"><div><span className="eyebrow">MASTERING STUDIO</span><h2 id="mastering-heading">사운드의 마지막 터치</h2></div><button title="마스터링 닫기" disabled={!!busy} onClick={() => setMasteringTrack(null)}><Icon name="close" /></button></div><div className="mastering-source"><Artwork track={masteringTrack} small /><div><strong>{masteringTrack.title}</strong><span>음량과 피크를 정돈해 완성하세요.</span></div></div><div className="mastering-fields"><div><label htmlFor="mastering-lufs">목표 음량</label><select id="mastering-lufs" value={masteringOptions.targetLufs} disabled={!!busy} onChange={event => setMasteringOptions({ ...masteringOptions, targetLufs: Number(event.target.value) })}>{[-14,-12,-10,-8].map(value => <option key={value} value={value}>{value} LUFS · {({ '-14': '자연스럽게', '-12': '적당히', '-10': '강하게', '-8': '더 강하게' } as Row)[value]}</option>)}</select></div><div><label htmlFor="mastering-peak">최대 피크</label><select id="mastering-peak" value={masteringOptions.truePeak} disabled={!!busy} onChange={event => setMasteringOptions({ ...masteringOptions, truePeak: Number(event.target.value) })}>{[-2,-1,-0.5,0].map(value => <option key={value} value={value}>{value} dBTP</option>)}</select></div></div><label className="field-label" htmlFor="mastering-character">사운드 성향</label><select id="mastering-character" value={masteringOptions.character} disabled={!!busy} onChange={event => setMasteringOptions({ ...masteringOptions, character: event.target.value })}><option value="gentle">부드럽게 · 자연스러운 다이내믹</option><option value="balanced">균형 있게 · 선명하고 안정적인 사운드</option><option value="punchy">힘 있게 · 또렷한 존재감</option></select><p className="mastering-note">원곡은 그대로 유지하고, 별도의 WAV 파일로 저장합니다.</p><div className="modal-buttons"><button className="secondary" disabled={!!busy} onClick={() => setMasteringTrack(null)}>취소</button><button className="primary mastering-submit" disabled={!!busy} onClick={() => void run('mastering', async () => { await call('mastering', { trackId: masteringTrack.id, options: masteringOptions }); setQueueOpen(true); setMasteringTrack(null); })}>{busy === 'mastering' ? '작업 준비 중…' : '마스터링 시작'}</button></div></section></div>}
+    {importDialog && <div className="modal-backdrop" onClick={closeMusicImport}><section className="modal music-import-modal" role="dialog" aria-modal="true" aria-labelledby="music-import-heading" onClick={event => event.stopPropagation()}><div className="modal-title"><div><span className="eyebrow">IMPORT MUSIC</span><h2 id="music-import-heading">음악 가져오기</h2></div><button disabled={!!busy} title="음악 가져오기 닫기" onClick={closeMusicImport}><Icon name="close" /></button></div>
+      {['choose','url'].includes(importDialog.step) && <><label className="field-label" htmlFor="import-project">저장할 프로젝트</label><select id="import-project" value={importDialog.projectId} disabled={!!busy} onChange={event => setImportDialog({ ...importDialog, projectId: event.target.value })}><option value="">프로젝트 선택</option>{data.projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select>{importDialog.playlistId && <p className="field-help import-playlist-note">가져온 음악은 선택한 프로젝트에 저장되고, 「{data.playlists?.find(item => item.id === importDialog.playlistId)?.name || '플레이리스트'}」 플레이리스트에도 함께 담깁니다.</p>}{!data.projects.length &&<button className="text-button import-new-project" onClick={() => ask('새 프로젝트', '프로젝트 이름', async name => { const created = await call('createProject', { name }); setImportDialog(current => ({ ...current, projectId: created.id })); })}>프로젝트 만들기 +</button>}</>}
+      {importDialog.step === 'choose' && <div className="import-methods"><button disabled={!!busy || !importDialog.projectId} onClick={chooseLocalMusic}><Icon name="folder" size={24} /><strong>파일에서 가져오기</strong><small>PC에 저장된 음악 파일</small></button><button disabled={!!busy || !importDialog.projectId} onClick={() => setImportDialog({ ...importDialog, step: 'url' })}><Icon name="upload" size={24} /><strong>YouTube URL</strong><small>추출 후 WAV 또는 MP3 선택</small></button></div>}
+      {importDialog.step === 'url' && <><label className="field-label" htmlFor="youtube-url">YouTube URL</label><input id="youtube-url" type="url" autoFocus value={youtubeUrl} disabled={!!busy} onChange={event => setYoutubeUrl(event.target.value)} placeholder="https://www.youtube.com/watch?v=…" /><div className="modal-buttons"><button className="secondary" disabled={!!busy} onClick={() => setImportDialog({ ...importDialog, step: 'choose' })}>뒤로</button><button className="primary" disabled={!!busy || !importDialog.projectId || !youtubeUrl.trim()} onClick={extractYoutube}>음악 추출</button></div></>}
+      {['progress','importing'].includes(importDialog.step) && <div className="youtube-progress" role="status"><strong>{importDialog.step === 'importing' ? '음악 파일 저장 중' : 'YouTube 음악 추출 중'}</strong><p>{youtubeJob?.stage || '작업을 준비하고 있습니다.'}</p>{typeof youtubeJob?.progress === 'number' ? <div className="real-progress"><progress max="100" value={youtubeJob.progress} /><span>{Math.round(youtubeJob.progress)}%</span></div> : !['failed','cancelled'].includes(youtubeJob?.status) && <i className="job-spinner" aria-hidden="true" />}{youtubeJob?.error && <p className="job-error">{youtubeJob.error}</p>}{youtubeJob?.status === 'cancelled' && <p>작업이 취소되었습니다.</p>}<div className="modal-buttons">{importDialog.step === 'importing' && ['failed','cancelled'].includes(youtubeJob?.status) && <button className="primary" disabled={!!busy} onClick={() => setImportDialog(current => ({ ...current, step: 'format', jobId: current?.extractionJobId }))}>형식 다시 선택</button>}<button className="secondary" disabled={!!busy} onClick={closeMusicImport}>{['failed','cancelled'].includes(youtubeJob?.status) ? '닫기' : '작업 취소'}</button></div></div>}
+      {importDialog.step === 'format' && <><h3 className="youtube-title">{youtubeJob?.result?.title || '추출한 음악'}</h3><p className="field-help">음악 추출이 완료되었습니다. 저장할 형식을 선택하세요.</p><label className="field-label" htmlFor="youtube-format">저장 형식</label><select id="youtube-format" value={youtubeFormat} disabled={!!busy} onChange={event => setYoutubeFormat(event.target.value)}><option value="wav">WAV</option><option value="mp3">MP3 · 320 kbps</option></select><div className="modal-buttons"><button className="secondary" disabled={!!busy} onClick={closeMusicImport}>취소</button><button className="primary" disabled={!!busy} onClick={() => void run('youtubeImport', async () => { const result = await call('finalizeYoutube', { jobId: importDialog.jobId, format: youtubeFormat }); setImportDialog(current => ({ ...current, step: 'importing', jobId: result.jobId })); })}>음악 저장</button></div></>}
+    </section></div>}
+    {playlistPicker && <ChoiceLayer eyebrow="ADD TO PLAYLIST" title="플레이리스트에 추가" description={playlistPicker.length === 1 ? `「${data.tracks.find(track => track.id === playlistPicker[0])?.title || '선택한 곡'}」 곡을 담을 플레이리스트를 선택하세요.` : `선택한 ${playlistPicker.length}곡을 담을 플레이리스트를 선택하세요.`} items={(data.playlists || []).map(item => ({ id: item.id, icon: 'queue', label: item.name, detail: `${item.trackIds.filter((id: string) => data.tracks.some(track => track.id === id)).length}곡`, note: playlistPicker.every(id => item.trackIds.includes(id)) ? '이미 담김' : '' }))} empty="아직 플레이리스트가 없습니다. 아래에서 새로 만들어 추가해 주세요." createLabel="새로 만들어 추가" createPlaceholder="새 플레이리스트 이름" name={pickerName} setName={setPickerName} busy={!!busy} choose={id => addPickedToPlaylist((data.playlists || []).find(item => item.id === id)!)} create={createPlaylistForPicked} close={() => setPlaylistPicker(null)} />}
+    {restorePicker && (() => { const orphaned = (data.trash || []).filter(track => restorePicker.includes(track.id) && !data.projects.some(item => item.id === track.projectId)).length, others = restorePicker.length - orphaned; return <ChoiceLayer eyebrow="RESTORE" title="복원할 프로젝트 선택" description={`원래 프로젝트가 삭제된 곡 ${orphaned}곡을 복원할 프로젝트를 선택하세요. Stem은 곡과 함께 복원됩니다.${others ? ` 나머지 ${others}곡은 원래 프로젝트로 돌아갑니다.` : ''}`} items={data.projects.map(item => ({ id: item.id, icon: 'folder', label: item.name, detail: `${data.tracks.filter(track => track.projectId === item.id && track.kind !== 'stem').length}곡` }))} empty="복원할 수 있는 프로젝트가 없습니다. 아래에서 새 프로젝트를 만들어 복원해 주세요." createLabel="새 프로젝트로 복원" createPlaceholder="새 프로젝트 이름" name={pickerName} setName={setPickerName} busy={!!busy} choose={id => restoreInto(data.projects.find(item => item.id === id)!)} create={() => restoreInto(null)} close={() => setRestorePicker(null)} />; })()}
+    {modal && <div className="modal-backdrop" onClick={cancelModal}><form className="modal" onClick={e => e.stopPropagation()} onSubmit={e => { e.preventDefault(); void run('modal', async () => { await modal.action(modal.value.trim()); setModal(null); }); }}><div className="modal-title"><h2>{modal.title}</h2><button type="button" title="닫기" disabled={!!busy} onClick={cancelModal}><Icon name="close" /></button></div>{modal.confirmOnly ? <p className="delete-confirm-message">{modal.label}</p> : <><label className="field-label" htmlFor="modal-input">{modal.label}</label><input id="modal-input" autoFocus value={modal.value} onChange={e => setModal({ ...modal, value: e.target.value })} required /></>}<div className="modal-buttons"><button type="button" className="secondary" disabled={!!busy} onClick={cancelModal}>{modal.cancelLabel || '취소'}</button><button type="submit" className="primary" disabled={!!busy || (!modal.confirmOnly && !modal.value.trim())}>{busy === 'modal' ? '처리 중…' : modal.confirmLabel || (modal.confirmOnly ? '삭제' : '확인')}</button></div></form></div>}
+  </div>;
+}

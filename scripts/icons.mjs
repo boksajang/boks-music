@@ -1,0 +1,11 @@
+import sharp from 'sharp';
+import { readFile, writeFile } from 'node:fs/promises';
+const svg = await readFile('assets/icon.svg');
+const sizes = [16,24,32,48,64,128,256];
+const pngs = await Promise.all(sizes.map(size => sharp(svg).resize(size,size).png().toBuffer()));
+await writeFile('assets/icon.png', pngs.at(-1));
+const header = Buffer.alloc(6 + 16 * sizes.length);
+header.writeUInt16LE(1,2); header.writeUInt16LE(sizes.length,4);
+let offset = header.length;
+sizes.forEach((size,i) => { const p=6+i*16; header[p]=size===256?0:size; header[p+1]=header[p]; header.writeUInt16LE(1,p+4); header.writeUInt16LE(32,p+6); header.writeUInt32LE(pngs[i].length,p+8); header.writeUInt32LE(offset,p+12); offset+=pngs[i].length; });
+await writeFile('assets/icon.ico',Buffer.concat([header,...pngs]));

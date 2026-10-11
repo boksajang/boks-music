@@ -1,0 +1,4 @@
+/* Midnight editorial: composed whitespace and a blue paper sleeve. */
+.scene{background:radial-gradient(ellipse at 8% 8%,#263e56,transparent 55%),linear-gradient(130deg,#0c172b,#080f1e 75%,#22283c)}.art{border-radius:2%;box-shadow:0 24px 80px #0007}.rule{width:70%}
+
+.footer{gap:24px}.footer-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.clock{flex-shrink:0;white-space:nowrap}

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "paper",
+  "name": "소프트 페이퍼",
+  "description": "따뜻한 종이색과 절제된 타이포그래피",
+  "order": 4,
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "wave",
+    "double-wave",
+    "bars",
+    "round-bars",
+    "dots"
+  ],
+  "recommendedSpectrum": "wave",
+  "stylesheet": "theme.css"
+}

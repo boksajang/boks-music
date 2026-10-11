@@ -1,0 +1,8 @@
+/* A record sleeve and grooves, no per-frame blur. */
+.scene{background:radial-gradient(ellipse at 28% 40%,#354150,#0b1423 57%,#141827)}.art{left:7%;top:18%;width:36%;border-radius:50%;border:20px solid #101116;box-shadow:0 0 0 2px #72839c55,0 0 0 12px #10131a,0 20px 60px #0008;background:repeating-radial-gradient(circle,#171c25 0,#171c25 2px,#313844 3px,#10131b 5px)}.art img,.art-abstract{position:absolute;width:35%;height:35%;inset:32.5%;border-radius:50%;object-fit:cover}.art-abstract b{display:none}.content{left:51%;right:6%}.spectrum{left:51%;width:43%}.portrait .art{left:17%;top:12%;width:66%;border-width:12px}.portrait .content{left:9%;right:9%;top:53%}.portrait .spectrum{left:9%;width:82%}
+
+.spectrum{left:7%;top:18%;bottom:auto;width:36%;height:auto;aspect-ratio:1;transform:scale(1.65);pointer-events:none}.portrait .spectrum{left:17%;top:12%;bottom:auto;width:66%;height:auto;aspect-ratio:1}
+
+.footer{gap:24px}.footer-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.clock{flex-shrink:0;white-space:nowrap}
+
+.portrait .content{top:58%}

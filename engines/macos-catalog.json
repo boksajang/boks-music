@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "runtime": {
+    "arch": "arm64",
+    "archiveFormat": "tar.gz",
+    "version": "0.9.0",
+    "sha256": "7cea9219d5f06475011c5d225d71d988cecef633ff7d098ee8a4c7b08583b1b4",
+    "minMacOS": "13.3",
+    "sourceCommit": "795c45fbde0a7d29c93b22199728ff5caaec02e5",
+    "bytes": 29162796,
+    "platform": "darwin",
+    "url": "https://github.com/0xShug0/audio.cpp/releases/download/v0.9.0/audio-v0.9.0-bin-macos-arm64-metal.tar.gz",
+    "backend": "metal",
+    "executable": "audiocpp_cli"
+  },
+  "uv": {
+    "url": "https://github.com/astral-sh/uv/releases/download/0.12.23/uv-aarch64-apple-darwin.tar.gz",
+    "sha256": "50487ae565ccd96e499056b4674d438f4c53170202617b4c759defe0c6a1b544",
+    "archiveFormat": "tar.gz",
+    "bytes": 17044217,
+    "archiveSubdir": "uv-aarch64-apple-darwin",
+    "executable": "uv",
+    "version": "0.12.23"
+  },
+  "models": [
+    {
+      "bytes": 7261484576,
+      "repo": "audio-cpp/Yue2-3B-GGUF",
+      "sha256": "4cf3fdffbaaed2d8e30a3122ac7cd27d0c96f8921805f173da9758c685b3c7d6",
+      "revision": "cca74d8980c00f30ab8d52248a367c01ad633ec2",
+      "url": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF/resolve/cca74d8980c00f30ab8d52248a367c01ad633ec2/yue2-3b-bf16.gguf",
+      "filename": "yue2-3b-bf16.gguf",
+      "role": "backbone"
+    },
+    {
+      "bytes": 2665641504,
+      "repo": "audio-cpp/Yue2-3B-GGUF",
+      "sha256": "b80215b59a7fe41a4c76b6163c0ae1031672f892b5951d66fefaa2053a815029",
+      "revision": "cca74d8980c00f30ab8d52248a367c01ad633ec2",
+      "url": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF/resolve/cca74d8980c00f30ab8d52248a367c01ad633ec2/yue2-3b-q4_0.gguf",
+      "filename": "yue2-3b-q4_0.gguf",
+      "role": "backbone"
+    },
+    {
+      "bytes": 4264195616,
+      "repo": "audio-cpp/Yue2-3B-GGUF",
+      "sha256": "52be345b5155bf9ef0b2411e7df8d1d2b8e13b6d977a2f70c35612ec69b1f591",
+      "revision": "cca74d8980c00f30ab8d52248a367c01ad633ec2",
+      "url": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF/resolve/cca74d8980c00f30ab8d52248a367c01ad633ec2/yue2-3b-q8_0.gguf",
+      "filename": "yue2-3b-q8_0.gguf",
+      "role": "backbone"
+    },
+    {
+      "bytes": 265218656,
+      "repo": "audio-cpp/Yue2-3B-GGUF",
+      "sha256": "d4f4a05d8f291ae820cd1e43609da3fa91b56465810091a2b08c3350b751719d",
+      "revision": "cca74d8980c00f30ab8d52248a367c01ad633ec2",
+      "url": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF/resolve/cca74d8980c00f30ab8d52248a367c01ad633ec2/yue2-vae-f16.gguf",
+      "filename": "yue2-vae-f16.gguf",
+      "role": "vae"
+    },
+    {
+      "bytes": 530537760,
+      "repo": "audio-cpp/Yue2-3B-GGUF",
+      "sha256": "cf3b71c6ef13b8b7970f8c1013b899e4af6ff9756c93bda45bef542dd6e10546",
+      "revision": "cca74d8980c00f30ab8d52248a367c01ad633ec2",
+      "url": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF/resolve/cca74d8980c00f30ab8d52248a367c01ad633ec2/yue2-vae-f32.gguf",
+      "filename": "yue2-vae-f32.gguf",
+      "role": "vae"
+    },
+    {
+      "bytes": 2708224256,
+      "repo": "audio-cpp/SheetSage2-GGUF",
+      "sha256": "d858bfdf5ac7be16261ac6ee38754d6fca502149131b44a5262b4039fb72876e",
+      "revision": "4e88814450385334524e50df43724af583f74206",
+      "url": "https://huggingface.co/audio-cpp/SheetSage2-GGUF/resolve/4e88814450385334524e50df43724af583f74206/sheetsage2-orig.gguf",
+      "filename": "sheetsage2-orig.gguf",
+      "role": "transcriber"
+    }
+  ],
+  "sidecars": [
+    {
+      "bytes": 466,
+      "repo": "audio-cpp/Yue2-3B-GGUF",
+      "sha256": "203830cebde6e3644eb291925362990d198e66c3b6006cd11f1aaa21904bcc61",
+      "url": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF/resolve/cca74d8980c00f30ab8d52248a367c01ad633ec2/sidecars/yue2-generation-config.json",
+      "revision": "cca74d8980c00f30ab8d52248a367c01ad633ec2",
+      "filename": "sidecars/yue2-generation-config.json"
+    },
+    {
+      "bytes": 959,
+      "repo": "audio-cpp/Yue2-3B-GGUF",
+      "sha256": "ad3477bbef890bf98ae196c1e4b44779494a6231c4ab66f32708eabadf265329",
+      "url": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF/resolve/cca74d8980c00f30ab8d52248a367c01ad633ec2/sidecars/yue2-model-config.json",
+      "revision": "cca74d8980c00f30ab8d52248a367c01ad633ec2",
+      "filename": "sidecars/yue2-model-config.json"
+    },
+    {
+      "bytes": 2561218,
+      "repo": "audio-cpp/Yue2-3B-GGUF",
+      "sha256": "b2b1b8dfb5cc5f024bafc373121c6aba3f66f9a5a0269e243470a1de16a33186",
+      "url": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF/resolve/cca74d8980c00f30ab8d52248a367c01ad633ec2/sidecars/yue2-qwen.tiktoken",
+      "revision": "cca74d8980c00f30ab8d52248a367c01ad633ec2",
+      "filename": "sidecars/yue2-qwen.tiktoken"
+    },
+    {
+      "bytes": 1378,
+      "repo": "audio-cpp/Yue2-3B-GGUF",
+      "sha256": "f0191bb9694009956de44e0c361a6f1334760be4c8f848e599bde242a54a0970",
+      "url": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF/resolve/cca74d8980c00f30ab8d52248a367c01ad633ec2/sidecars/yue2-vae-config.json",
+      "revision": "cca74d8980c00f30ab8d52248a367c01ad633ec2",
+      "filename": "sidecars/yue2-vae-config.json"
+    }
+  ],
+  "defaults": {
+    "vae": "yue2-vae-f32.gguf",
+    "minMacOS": "14.0",
+    "transcriber": "sheetsage2-orig.gguf"
+  },
+  "verifiedOnMac": false
+}

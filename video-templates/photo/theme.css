@@ -1,0 +1,4 @@
+/* A photographic frame with a calm editorial column. */
+.scene{background:#172326}.background-photo{opacity:.7;width:57%;object-position:center}.grid,.orb{display:none}.art{left:0;top:0;width:57%;height:100%;border:0;border-radius:0;box-shadow:none;opacity:.75}.background-photo:not([hidden])~.art{opacity:0}.art img{object-fit:cover}.content{left:63%;right:5%;top:25%}.spectrum{left:63%;width:32%;bottom:12%}.topline{z-index:2}.lyric-line{font-size:calc(var(--u)*.029)}.portrait .art,.portrait .background-photo{width:100%;height:45%;left:0;top:0}.portrait .content{top:51%;left:9%;right:9%}.portrait .spectrum{left:9%;width:82%;bottom:10%}.portrait .topline{color:#e6f0f2}.portrait .lyric-line{font-size:calc(var(--u)*.033)}
+
+.footer{gap:24px}.footer-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.clock{flex-shrink:0;white-space:nowrap}
