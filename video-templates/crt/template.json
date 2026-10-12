@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "crt",
+  "name": "브라운관 TV",
+  "description": "주사선이 흐르는 둥근 브라운관, 곡이 바뀌면 다이얼이 돌고 채널 노이즈가 지나갑니다",
+  "order": 9,
+  "renderer": "canvas",
+  "scene": "crt",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal",
+    "instrumental"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "blocks",
+    "dots",
+    "mirror",
+    "round-bars",
+    "wave",
+    "double-wave",
+    "area"
+  ],
+  "recommendedSpectrum": "mirror"
+}

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "vinyl",
   "name": "바이닐 라운지",
-  "description": "레코드가 슬리브에서 나와 돌고, 톤암이 내려앉습니다",
+  "description": "램프 빛줄기 속에서 레코드가 슬리브에서 나와 돌고, 톤암이 내려앉습니다",
   "order": 3,
   "renderer": "canvas",
   "scene": "vinyl",

@@ -22,7 +22,9 @@ export default function vinyl(input){
   // Room: deep tone of the album color, a lamp light that sways slightly, dust in the light.
   const bg=ctx.createLinearGradient(0,0,0,H);bg.addColorStop(0,rgba(mix(art.deep,[30,22,18],.5)));bg.addColorStop(1,rgba(mix(art.deep,[6,5,5],.6)));ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
   const lampX=W*(portrait?.45:.3)+Math.sin(s.t*.12)*u*.04;radialGlow(ctx,lampX,H*.18,u*.95,warm,.2+energy.level*.08);radialGlow(ctx,W*.8,H*.9,u*.7,art.glow,.08);
-  drawParticles(ctx,particles,s.t,{width:W,height:H,color:[255,226,190],size:u*.008,alpha:.38,rise:.008,sway:.02,level:energy.level});
+  // Lamp beam: a soft cone from the lamp; dust drifts only inside it, catching the light.
+  const beamX=lampX,beamTop=-H*.05,beamW=u*(portrait?.9:.75);ctx.save();ctx.beginPath();ctx.moveTo(beamX-u*.05,beamTop);ctx.lineTo(beamX+u*.05,beamTop);ctx.lineTo(beamX+beamW/2,H);ctx.lineTo(beamX-beamW/2,H);ctx.closePath();const cone=ctx.createLinearGradient(0,beamTop,0,H);cone.addColorStop(0,rgba(warm,.16));cone.addColorStop(.7,rgba(warm,.04));cone.addColorStop(1,rgba(warm,0));ctx.fillStyle=cone;ctx.fill();ctx.clip();
+  drawParticles(ctx,particles,s.t,{width:W,height:H,color:[255,226,190],size:u*.006,alpha:.5,rise:.006,sway:.025});ctx.restore();
   // Record: slides out of the sleeve at the start of the song, back in at the end.
   const out=easeInOut((local-.2)/1.6)*s.exit,cx=sx+size/2+size*lerp(.04,.52,out),cy=sy+size/2,spin=s.t*(33.333/60)*Math.PI*2;
   if(s.frame&&['ring','radial-bars','double-ring','radial-dots'].includes(base.options.spectrum)){const box=r*1.07/.31;drawSpectrum(ctx,{kind:base.options.spectrum,bins:s.frame.bins,waveform:s.frame.waveform,color:base.options.color,tint:mix(warm,[255,255,255],.3),alpha:.5*out,amp:.5,x:cx-box/2,y:cy-box/2,width:box,height:box});}
@@ -38,8 +40,7 @@ export default function vinyl(input){
   vignette(ctx,W,H,{alpha:.5});
   // Text.
   const align=L.align,hx=align==='center'?W/2:L.head[0],rise=(1-show)*u*.025;
-  text(ctx,base.brand,portrait?u*.08:W*.06,L.top,{size:u*.017,weight:700,color:'rgba(255,240,226,.9)',spacing:.26,maxWidth:W*.4});
-  text(ctx,base.playlist,portrait?W-u*.08:W*.94,L.top,{size:u*.017,weight:500,color:'rgba(255,240,226,.68)',spacing:.12,align:'right',maxWidth:W*.42});
+  text(ctx,base.headline,portrait?W/2:W*.06,L.top,{size:u*.025,weight:800,color:'rgba(255,242,228,.94)',spacing:.02,align:portrait?'center':'left',maxWidth:portrait?u*.84:W*.5});
   text(ctx,`SIDE A  ·  ${String(i+1).padStart(2,'0')} / ${String(tracks.length).padStart(2,'0')}`,hx,L.head[1]+rise,{size:u*.017,weight:600,color:rgba(mix(warm,[255,255,255],.2)),spacing:.18,align,alpha:show});
   drawBlock(ctx,titleOf(i),hx,L.head[1]+u*.03+rise,{color:'#fff6ec',align,alpha:show});
   const {index,ease}=base.rollState(s),dim=[214,200,186],hot=[255,248,238];

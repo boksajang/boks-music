@@ -21,31 +21,31 @@ export default function paper(input){
  const trackItems=tracks.map((track,n)=>({number:n+1,title:track.title||'',duration:Number(track.duration)||0}));
 
  function draw(ctx,time){
-  const s=base.at(time),{i,local,show,energy}=s,art=base.art(i),ink=[34,32,38],pastel=hsl(art.hue,.55,.8);
+  const s=base.at(time),{i,local,show}=s,art=base.art(i),ink=[34,32,38],pastel=hsl(art.hue,.55,.8);
   // Paper desk with drifting pastel light from the album color.
   ctx.fillStyle='#efe9df';ctx.fillRect(0,0,W,H);
   radialGlow(ctx,W*(.25+Math.sin(s.t*.07)*.12),H*(.3+Math.cos(s.t*.05)*.1),u*.9,pastel,.55);
   radialGlow(ctx,W*(.8+Math.cos(s.t*.06)*.1),H*(.75+Math.sin(s.t*.08)*.08),u*.8,hsl(art.hue+40,.5,.82),.45);
   ctx.globalAlpha=.9;for(let y=0;y<H;y+=256)for(let x=0;x<W;x+=256)ctx.drawImage(grain,x,y);ctx.globalAlpha=1;
-  // Card: floats and sways slightly; lifts a little with the music.
-  const sway=Math.sin(s.t*.35)*.004,lift=Math.sin(s.t*.5)*u*.004-energy.level*u*.004,x0=cx0,y0=cy0+lift;
-  ctx.save();ctx.translate(x0+cw/2,y0+ch/2);ctx.rotate(sway);ctx.translate(-cw/2,-ch/2);
+  // Card: stays put (a card that moved with the music read as a shaking screen); the record, light and controls move.
+  const x0=cx0,y0=cy0;
+  ctx.save();ctx.translate(x0,y0);
   drawShadow(ctx,shadow,0,0,cw,ch,{alpha:.55,offsetY:.035,spread:1.08});
   ctx.fillStyle='#fbfaf7';ctx.beginPath();ctx.roundRect(0,0,cw,ch,u*.035);ctx.fill();
   ctx.strokeStyle='rgba(60,50,40,.08)';ctx.lineWidth=1;ctx.stroke();
   // Cover with the record peeking out and turning.
   const [axa,aya,size]=artBox(),ax=axa-x0,ay=aya-cy0,r=size*.48,out=easeInOut((local-.3)/1.5)*s.exit;
-  const rx=portrait?ax+size/2+size*lerp(.05,.3,out):ax+size/2+size*lerp(.05,.32,out),ry=ay+size/2;
+  const rx=ax+size/2+size*lerp(.05,portrait?.36:.44,out),ry=ay+size/2;
   ctx.globalAlpha=Math.min(1,show*1.6);drawShadow(ctx,round,rx-r,ry-r,r*2,r*2,{alpha:.6,offsetY:.03,spread:1.15});
   drawDisc(ctx,record(i),rx,ry,r,s.t*(33.333/60)*Math.PI*2,{kind:'vinyl',gloss:.7});
   drawShadow(ctx,shadow,ax,ay,size,size,{alpha:.9,offsetY:.04,spread:1.12});
   roundedImage(ctx,art.image,ax,ay,size,size,u*.014);ctx.globalAlpha=1;
   // Title and playlist.
   const tx=portrait?cw/2:cw*L.title[0]+cw*.18,ty=ch*L.title[1],rise=(1-show)*u*.02;
-  text(ctx,base.brand,portrait?cw*.07:cw*.04,portrait?ch*.04:ch*.07,{size:u*.016,weight:800,color:rgba(mix(art.accent,ink,.35)),spacing:.24,maxWidth:cw*.5});
+  text(ctx,base.headline,portrait?cw*.07:cw*.04,portrait?ch*.045:ch*.075,{size:u*.024,weight:800,color:rgba(mix(art.accent,ink,.45)),spacing:.04,maxWidth:cw*.6});
   drawBlock(ctx,titleOf(i),tx,ty+rise,{color:rgba(ink),align:'center',alpha:show});
   const titleH=titleOf(i).height;
-  text(ctx,[base.playlist,`${i+1} / ${tracks.length}`].filter(Boolean).join('  ·  '),tx,ty+titleH+u*.035+rise,{size:u*.018,weight:500,color:'rgba(60,56,64,.62)',align:'center',maxWidth:portrait?cw*.84:cw*.38,alpha:show});
+  text(ctx,`TRACK ${String(i+1).padStart(2,'0')} / ${String(tracks.length).padStart(2,'0')}`,tx,ty+titleH+u*.035+rise,{size:u*.018,weight:500,color:'rgba(60,56,64,.62)',align:'center',maxWidth:portrait?cw*.84:cw*.38,alpha:show});
   // Lyrics: three centered lines, the current one dark and slightly larger.
   const lx=cw*lxr,ly=ch*lyr,{index,ease}=base.rollState(s);
   if(vocal){const items=lyricsOf(i);roll(ctx,{x:lx,y:ly,w:lw,h:lh,rowH,anchor:1,index,ease,count:items.length,fade:.2,row:(g,n,x,top,w,h,e)=>lyricRow(g,items[n],x,top,w,h,e,{align:'center',dim:[150,146,150],hot:ink,dimAlpha:.55,scale:.07})});}

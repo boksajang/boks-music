@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "neon",
+  "name": "네온 사인",
+  "description": "벽돌 벽의 네온 가사가 깜빡이며 켜지고, 젖은 바닥에 일렁이며 비칩니다",
+  "order": 14,
+  "renderer": "canvas",
+  "scene": "neon",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "round-bars",
+    "bars",
+    "mirror",
+    "blocks",
+    "dots",
+    "wave",
+    "double-wave"
+  ],
+  "recommendedSpectrum": "round-bars"
+}

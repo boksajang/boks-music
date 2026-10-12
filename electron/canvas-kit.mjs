@@ -119,7 +119,13 @@ export function discTexture(size,{kind='vinyl',art,accent=[150,170,210]}={}){
   const base=g.createRadialGradient(0,0,r*.3,0,0,r);base.addColorStop(0,'#16171b');base.addColorStop(1,'#0a0a0d');g.fillStyle=base;g.beginPath();g.arc(0,0,r,0,Math.PI*2);g.fill();
   for(let rad=r*.36;rad<r*.97;rad+=Math.max(1.2,size*.0032)){g.strokeStyle=`rgba(255,255,255,${.018+rng()*.035})`;g.lineWidth=Math.max(.6,size*.0012);g.beginPath();g.arc(0,0,rad,0,Math.PI*2);g.stroke();}
   for(const edge of [.355,.62,.97]){g.strokeStyle='rgba(0,0,0,.65)';g.lineWidth=size*.004;g.beginPath();g.arc(0,0,r*edge,0,Math.PI*2);g.stroke();}
+  // Pressing irregularities: faint uneven wedges and a run-out mark turn with the record, so a spin
+  // is visible even where only the grooves show (the fixed gloss in drawDisc does not move).
+  for(const [from,span,alpha] of [[.3,.5,.07],[1.9,.28,.05],[3.4,.62,.06],[4.8,.2,.08]]){const wedge=g.createConicGradient(from,0,0);wedge.addColorStop(0,'rgba(255,255,255,0)');wedge.addColorStop(span/(Math.PI*2)/2,`rgba(255,255,255,${alpha})`);wedge.addColorStop(span/(Math.PI*2),'rgba(255,255,255,0)');g.fillStyle=wedge;g.beginPath();g.arc(0,0,r*.96,0,Math.PI*2);g.arc(0,0,r*.37,0,Math.PI*2,true);g.fill('evenodd');}
+  g.strokeStyle='rgba(255,255,255,.22)';g.lineWidth=Math.max(1,size*.0025);g.beginPath();g.arc(0,0,r*.5,-.35,.05);g.stroke();g.beginPath();g.arc(0,0,r*.78,2.6,2.75);g.stroke();
   g.save();g.beginPath();g.arc(0,0,r*.33,0,Math.PI*2);g.clip();if(art)drawCover(g,art,-r*.33,-r*.33,r*.66,r*.66);else{g.fillStyle=rgba(accent);g.fill();}g.restore();
+  // Label print: a band of text marks along one side of the label edge.
+  g.save();g.fillStyle='rgba(255,255,255,.75)';for(let k=0;k<14;k++){g.save();g.rotate(-1.2+k*.11);g.fillRect(-size*.004,-r*.3,size*.008,size*(.012+((k*7)%5)*.004));g.restore();}g.restore();
   g.strokeStyle='rgba(255,255,255,.18)';g.lineWidth=size*.002;g.beginPath();g.arc(0,0,r*.33,0,Math.PI*2);g.stroke();
   g.fillStyle='#0b0b0e';g.beginPath();g.arc(0,0,r*.022,0,Math.PI*2);g.fill();
  }else{
@@ -273,7 +279,19 @@ export function sceneBase({width,height,tracks,options,images={},analyses=[]},{h
   const cues=state.track.cues||[];let index=-1;for(let n=cues.length-1;n>=0;n--)if(Number.isFinite(cues[n].start)&&cues[n].start<=state.local){index=n;break;}
   return {index,ease:index>=0?easeOut((state.local-cues[index].start)/.42):1};
  }
- return {width,height,portrait,u,vocal,fps,tracks,options,total,offsets,art,at,rollState,brand:String(options.brand??'BOKS MUSIC').trim(),playlist:String(options.playlistTitle||'').trim(),background:images.background||null};
+ /**
+  * The sung line now: its index, start, end (its own end, else the next line's start, at most 8 s) and
+  * progress 0..1 through it. Used for karaoke wipes and word-by-word reveals; -1 before the first line.
+  */
+ function lineState(state){
+  const cues=state.track.cues||[];let index=-1;for(let n=cues.length-1;n>=0;n--)if(Number.isFinite(cues[n].start)&&cues[n].start<=state.local){index=n;break;}
+  if(index<0){const next=cues.find(cue=>Number.isFinite(cue.start));return {index:-1,start:0,end:next?next.start:state.duration,progress:0,next:next?next.start-state.local:Infinity,text:''};}
+  const cue=cues[index],following=cues.slice(index+1).find(item=>Number.isFinite(item.start))?.start;
+  const end=Math.min(cue.start+8,Number.isFinite(cue.end)&&cue.end>cue.start?cue.end:(following??state.duration),following??Infinity,state.duration);
+  return {index,start:cue.start,end,progress:clamp((state.local-cue.start)/Math.max(.2,end-cue.start),0,1),next:following!==undefined?following-state.local:Infinity,text:cue.text||''};
+ }
+ // headline: the title text typed in the video window (shown at the top of every scene; empty hides it).
+ return {width,height,portrait,u,vocal,fps,tracks,options,total,offsets,art,at,rollState,lineState,headline:String(options.brand??'BOKS MUSIC').trim(),background:images.background||null};
 }
 
 /**

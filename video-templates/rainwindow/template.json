@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "rainwindow",
+  "name": "비 오는 창가",
+  "description": "김 서린 창에 빗방울이 흘러내리고, 손가락으로 닦아낸 자리에 가사가 나타납니다",
+  "order": 11,
+  "renderer": "canvas",
+  "scene": "rainwindow",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal",
+    "instrumental"
+  ],
+  "requiresBackground": true,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "wave",
+    "double-wave",
+    "round-bars",
+    "bars",
+    "dots",
+    "mirror"
+  ],
+  "recommendedSpectrum": "wave"
+}

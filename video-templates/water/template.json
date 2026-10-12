@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "water",
+  "name": "물결 반사",
+  "description": "수면 위로 떠오른 앨범과 가사가 물결에 일렁이며 비치고, 저음에 파문이 퍼집니다",
+  "order": 12,
+  "renderer": "canvas",
+  "scene": "water",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal",
+    "instrumental"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "round-bars",
+    "bars",
+    "mirror",
+    "blocks",
+    "dots",
+    "wave"
+  ],
+  "recommendedSpectrum": "round-bars"
+}

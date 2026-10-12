@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "cassette",
+  "name": "카세트 테이프",
+  "description": "테이프가 실제로 감기며 릴이 돌고, 곡마다 카세트가 빠졌다 들어갑니다. J-카드에 전체 곡 목록",
+  "order": 8,
+  "renderer": "canvas",
+  "scene": "cassette",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal",
+    "instrumental"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "blocks",
+    "bars",
+    "dots",
+    "mirror",
+    "round-bars",
+    "wave",
+    "area"
+  ],
+  "recommendedSpectrum": "blocks"
+}

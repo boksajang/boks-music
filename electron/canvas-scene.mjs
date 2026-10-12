@@ -7,12 +7,26 @@ import paper from './canvas-scenes/paper.mjs';
 import cinematic from './canvas-scenes/cinematic.mjs';
 import spectrum from './canvas-scenes/spectrum.mjs';
 import tracklist from './canvas-scenes/tracklist.mjs';
+import cassette from './canvas-scenes/cassette.mjs';
+import crt from './canvas-scenes/crt.mjs';
+import radio from './canvas-scenes/radio.mjs';
+import vumeter from './canvas-scenes/vumeter.mjs';
+import polaroid from './canvas-scenes/polaroid.mjs';
+import rainwindow from './canvas-scenes/rainwindow.mjs';
+import water from './canvas-scenes/water.mjs';
+import phone from './canvas-scenes/phone.mjs';
+import neon from './canvas-scenes/neon.mjs';
+import kinetic from './canvas-scenes/kinetic.mjs';
+import karaoke from './canvas-scenes/karaoke.mjs';
+import swiss from './canvas-scenes/swiss.mjs';
+import coverflow from './canvas-scenes/coverflow.mjs';
+import subway from './canvas-scenes/subway.mjs';
 
 /**
  * GPU canvas scenes. A scene draws one frame for a given time on a 2D canvas, so the same code drives
  * the editor preview and the WebCodecs renderer (no screenshots).
  */
-const SCENES={albumblur,photo,vinyl,paper,cinematic,spectrum,tracklist};
+const SCENES={albumblur,photo,vinyl,paper,cinematic,spectrum,tracklist,cassette,crt,radio,vumeter,polaroid,rainwindow,water,phone,neon,kinetic,karaoke,swiss,coverflow,subway};
 export const CANVAS_SCENES=Object.freeze(Object.keys(SCENES));
 /** Scene modules, for the render cache identity. */
 export const CANVAS_SCENE_FILES=Object.freeze(['./canvas-kit.mjs','./audio-frame.mjs',...CANVAS_SCENES.map(id=>`./canvas-scenes/${id}.mjs`)]);
@@ -93,3 +107,14 @@ export function mountCanvasPreview(host,{scene,tracks=[],options={},duration,ass
   dispose:()=>{disposed=true;controller.abort();cancelAnimationFrame(frame);observer.disconnect();if(media)release();else ready.then(release);}};
 }
 export {frameAt};
+
+/** One still frame of a scene for the template picker (same drawing code as the video). */
+export function renderSceneThumbnail(canvas,{scene,tracks=[],options={},images={},time=0}){
+ try{
+  const rows=tracks.map(track=>({...track,duration:Number(track.duration)||0}));
+  if(!rows.length)return false;
+  createCanvasScene({scene,width:canvas.width,height:canvas.height,tracks:rows,options:{...options,width:canvas.width,height:canvas.height},images,analyses:[]}).draw(canvas.getContext('2d',{alpha:false}),time);
+  return true;
+ }catch(error){console.error(error);return false;}
+}
+export {loadBitmap as loadSceneBitmap};

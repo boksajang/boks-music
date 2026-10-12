@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "kinetic",
+  "name": "키네틱 타이포",
+  "description": "굵은 가사 단어가 하나씩 튀어나오고, 줄이 바뀌면 색 블록이 화면을 밀어냅니다",
+  "order": 15,
+  "renderer": "canvas",
+  "scene": "kinetic",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "blocks",
+    "bars",
+    "round-bars",
+    "mirror",
+    "dots",
+    "wave",
+    "double-wave",
+    "area"
+  ],
+  "recommendedSpectrum": "blocks"
+}

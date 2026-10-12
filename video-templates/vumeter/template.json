@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "vumeter",
+  "name": "스튜디오 콘솔",
+  "description": "VU 미터 바늘이 음악에 맞춰 흔들리고, 곡이 바뀌면 채널 페이더가 교차해 올라갑니다 (경음악 전용)",
+  "order": 19,
+  "renderer": "canvas",
+  "scene": "vumeter",
+  "maxResolution": 2160,
+  "modes": [
+    "instrumental"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "blocks",
+    "mirror",
+    "dots",
+    "area",
+    "mirror-area",
+    "wave",
+    "double-wave"
+  ],
+  "recommendedSpectrum": "bars"
+}

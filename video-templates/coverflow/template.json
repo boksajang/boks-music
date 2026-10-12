@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "coverflow",
+  "name": "커버 플로우",
+  "description": "앨범 커버가 늘어선 3D 캐러셀이 곡마다 한 칸씩 미끄러지고, 광택 바닥에 비칩니다 (경음악 전용)",
+  "order": 20,
+  "renderer": "canvas",
+  "scene": "coverflow",
+  "maxResolution": 2160,
+  "modes": [
+    "instrumental"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "reflection",
+    "mirror",
+    "round-bars",
+    "bars",
+    "wave"
+  ],
+  "recommendedSpectrum": "reflection"
+}

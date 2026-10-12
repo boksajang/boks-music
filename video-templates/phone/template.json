@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "phone",
+  "name": "스마트폰 플레이어",
+  "description": "기울어진 스마트폰 화면에서 가사가 흐르고, 곡마다 폰이 다른 각도로 돌아섭니다",
+  "order": 13,
+  "renderer": "canvas",
+  "scene": "phone",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal",
+    "instrumental"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "round-bars",
+    "bars",
+    "mirror",
+    "dots",
+    "wave",
+    "mirror-area"
+  ],
+  "recommendedSpectrum": "round-bars"
+}

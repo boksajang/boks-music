@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "photo",
   "name": "포토 스테이지",
-  "description": "사진이 천천히 다가오고, 앨범에서 CD가 나와 돌아갑니다",
+  "description": "블라인드 빛이 흐르는 사진이 천천히 다가오고, 앨범에서 CD가 나와 돕니다",
   "order": 2,
   "renderer": "canvas",
   "scene": "photo",

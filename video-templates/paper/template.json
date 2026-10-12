@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "paper",
   "name": "페이퍼 플레이어",
-  "description": "종이 위 플레이어 카드와 돌아가는 레코드",
+  "description": "종이 위 플레이어 카드, 커버 뒤에서 레코드가 나와 돕니다",
   "order": 4,
   "renderer": "canvas",
   "scene": "paper",

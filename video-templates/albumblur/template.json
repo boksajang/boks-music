@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "albumblur",
   "name": "앨범 블러",
-  "description": "흐린 앨범아트가 흐르고, 떠 있는 앨범 옆으로 가사가 지나갑니다",
+  "description": "흐린 앨범아트 위로 떠 있는 앨범에 유리 반사가 스치고, 궤도선이 흔들립니다",
   "order": 1,
   "renderer": "canvas",
   "scene": "albumblur",

@@ -404,13 +404,15 @@ const actions={
   openVideoTemplatesFolder:async()=>{const error=await shell.openPath(videoTemplateDirectory);if(error)throw Error(error);return {opened:true};},
   getVideoPreflight:async p=>{const list=findById(store.data.playlists,p.playlistId,'재생목록');const rows=list.trackIds.map(id=>store.data.tracks.find(t=>t.id===id&&!t.trashedAt&&t.kind!=='stem')).filter(Boolean);const result=await videoPreflight(rows,p.mode);return {...result,tracks:result.tracks.map(({audioPath,artPath,...row})=>row)};},
   revealVideo:async p=>{const row=findById(store.data.videos,p.id,'영상');try{if(!(await stat(row.videoPath)).isFile())throw Error();}catch{throw new Error('영상 파일을 찾을 수 없습니다. 이동하거나 삭제했을 수 있습니다.');}shell.showItemInFolder(row.videoPath);return {revealed:true};},
-  videoDestination:async()=>{const result=await dialog.showOpenDialog(window,{title:'영상 저장 폴더 선택',properties:['openDirectory','createDirectory']});if(result.canceled||!result.filePaths?.[0])return {cancelled:true};const directory=await realpath(result.filePaths[0]);if(!(await stat(directory)).isDirectory())throw Error('폴더를 선택하세요.');videoDirectories.add(directory);return {directory};},
+  videoDestination:async()=>{const result=await dialog.showOpenDialog(window,{title:'영상 저장 폴더 선택',...(store.data.settings.videoDirectory?{defaultPath:store.data.settings.videoDirectory}:{}),properties:['openDirectory','createDirectory']});if(result.canceled||!result.filePaths?.[0])return {cancelled:true};const directory=await realpath(result.filePaths[0]);if(!(await stat(directory)).isDirectory())throw Error('폴더를 선택하세요.');videoDirectories.add(directory);return {directory};},
   selectVideoBackground:async()=>{const result=await dialog.showOpenDialog(window,{title:'영상 배경 사진 선택',properties:['openFile'],filters:[{name:'Image',extensions:['png','jpg','jpeg','webp']} ]});if(result.canceled||!result.filePaths?.[0])return {cancelled:true};const file=await realpath(result.filePaths[0]);if(!(await stat(file)).isFile()||nativeImage.createFromPath(file).isEmpty())throw Error('읽을 수 있는 사진을 선택하세요.');const key=id();videoBackgrounds.set(key,file);return {path:file,url:`boks-media://video-background/${key}`};},
   renderPlaylistVideo:async p=>{
     // The scene shows the video title at the top; the brand line defaults to the saved one.
     const opts=validateVideoOptions({...p.options,playlistTitle:typeof p.title==='string'?p.title:undefined,brand:p.options?.brand??store.data.settings.videoBrand});if(p.options?.codec&&p.options.codec!=='h264')throw Error('H.264 코덱만 지원합니다.');
     const title=requiredString(p.title,'영상 이름',180),list=findById(store.data.playlists,p.playlistId,'재생목록');
-    if(typeof p.directory!=='string'||!videoDirectories.has(p.directory)||await realpath(p.directory)!==p.directory)throw Error('영상 저장 폴더를 선택 창에서 다시 선택하세요.');
+    // A folder chosen in the dialog, or the one saved from the last video (still an existing folder).
+    const savedFolder=typeof p.directory==='string'&&p.directory===store.data.settings.videoDirectory&&await stat(p.directory).then(info=>info.isDirectory(),()=>false);
+    if(typeof p.directory!=='string'||!(videoDirectories.has(p.directory)||savedFolder)||await realpath(p.directory).catch(()=>'')!==p.directory)throw Error('영상 저장 폴더를 선택 창에서 다시 선택하세요.');
     if(p.backgroundPath&&![...videoBackgrounds.values()].includes(p.backgroundPath))throw Error('배경 사진을 선택 창에서 선택하세요.');
     const backgroundPath=getVideoTemplate(opts.template).requiresBackground?p.backgroundPath:undefined;
     const rows=list.trackIds.map(id=>store.data.tracks.find(t=>t.id===id&&!t.trashedAt&&t.kind!=='stem')).filter(Boolean),prepared=await videoPreflight(rows,opts.mode);if(!prepared.ready)throw Error('가사와 가사 시간을 먼저 검토하세요.');
@@ -418,7 +420,7 @@ const actions={
     if(!ffmpegPath)throw Error('영상 출력에 필요한 FFmpeg를 찾을 수 없습니다.');
     const safe=title.replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_').replace(/[. ]+$/,'').slice(0,100)||'playlist';
     const outputPath=path.join(p.directory,safe+'-'+id()+'.'+opts.format);
-    if(opts.brand!==store.data.settings.videoBrand)await store.mutate(data=>{data.settings.videoBrand=opts.brand;});
+    if(opts.brand!==store.data.settings.videoBrand||p.directory!==store.data.settings.videoDirectory)await store.mutate(data=>{data.settings.videoBrand=opts.brand;data.settings.videoDirectory=p.directory;});
     const [job]=await queue.add([{operation:'video',playlistId:list.id,trackIds:rows.map(t=>t.id),title,options:opts,directory:p.directory,outputPath,backgroundPath,ffmpegPath,settings:{...store.data.settings}}]);return {jobId:job.id};
   },
   resumeVideo:async p=>{

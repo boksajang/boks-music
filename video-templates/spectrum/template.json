@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "spectrum",
   "name": "사운드 갤러리",
-  "description": "돌아가는 앨범 원반과 음악에 맞춰 퍼지는 빛",
+  "description": "돌아가는 앨범 원반에서 음악 세기만큼 고리가 퍼지고, 저음에 빛이 커집니다",
   "order": 6,
   "renderer": "canvas",
   "scene": "spectrum",

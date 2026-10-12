@@ -1,4 +1,4 @@
-import {sceneBase,createRoll,lyricLayout,lyricRow,trackRow,blurredCover,drawDrift,shadowSprite,drawShadow,roundedImage,makeParticles,drawParticles,radialGlow,vignette,drawSpectrum,glyph,text,fitText,drawBlock,progressBar,stamp,rgba,layer,hash} from '../canvas-kit.mjs';
+import {sceneBase,createRoll,lyricLayout,lyricRow,trackRow,blurredCover,drawDrift,shadowSprite,drawShadow,roundedImage,radialGlow,vignette,drawSpectrum,glyph,text,fitText,drawBlock,progressBar,stamp,rgba,layer,hash} from '../canvas-kit.mjs';
 
 /**
  * 앨범 블러: the song's own artwork, blurred, drifts behind a floating album card; an orbit line turns
@@ -9,7 +9,7 @@ export default function albumblur(input){
  const L=portrait
   ?{art:[(W-u*.66)/2,H*.12,u*.66],index:[W/2,H*.12+u*.66+u*.075],title:[W/2,H*.12+u*.66+u*.1,u*.84,u*.058,u*.15],lyrics:[u*.08,H*.6,u*.84,u*.092,5],spectrum:[0,H*.865,W,H*.08],bar:[u*.08,H*.952,u*.84],top:H*.05,align:'center',orbit:[.64,.71]}
   :{art:[W*.08,H*.15,H*.46],index:[W*.08,H*.15+H*.46+H*.08],title:[W*.08,H*.15+H*.46+H*.1,W*.3,H*.046,H*.12],lyrics:[W*.44,H*.12,W*.49,H*.1,7],spectrum:[0,H*.9,W,H*.085],bar:[W*.08,H*.855,W*.3],top:H*.08,align:'left',orbit:[.62,.69]}; 
- const shadow=shadowSprite(256),particles=makeParticles(hash('albumblur'),30),roll=createRoll();
+ const shadow=shadowSprite(256),roll=createRoll();
  const backdrops=new Map(),layouts=new Map(),titles=new Map();
  const measure=layer(8,8).getContext('2d');
  const backdrop=i=>{if(!backdrops.has(i)){if(backdrops.size>3)backdrops.delete(backdrops.keys().next().value);backdrops.set(i,blurredCover(base.art(i).image,W/H,{blur:.05,dim:.06}));}return backdrops.get(i);};
@@ -26,7 +26,6 @@ export default function albumblur(input){
   drawDrift(ctx,backdrop(i),W,H,s.t,{zoom:1.2,seed:i,alpha:i>0?s.enter:1});
   const shade=ctx.createLinearGradient(0,0,portrait?0:W,portrait?H:0);shade.addColorStop(0,'rgba(5,7,12,.24)');shade.addColorStop(.5,'rgba(5,7,12,.34)');shade.addColorStop(1,'rgba(5,7,12,.5)');ctx.fillStyle=shade;ctx.fillRect(0,0,W,H);
   vignette(ctx,W,H,{alpha:.5});
-  drawParticles(ctx,particles,s.t,{width:W,height:H,color:art.soft,size:u*.012,alpha:.32,level:energy.level});
   // Spectrum: a soft band along the bottom, behind the text.
   if(s.frame){const [sx,sy,sw,sh]=L.spectrum;drawSpectrum(ctx,{kind:base.options.spectrum,bins:s.frame.bins,waveform:s.frame.waveform,color:base.options.color,tint:ink,alpha:.42,x:sx,y:sy,width:sw,height:sh});}
   // Album card: floats, breathes with the music, slides in for each song.
@@ -41,6 +40,8 @@ export default function albumblur(input){
   ctx.setLineDash([u*.004,u*.012]);ctx.strokeStyle=rgba(ink,.22);ctx.beginPath();ctx.arc(0,0,size*L.orbit[1],-turn*.6,-turn*.6+Math.PI*2);ctx.stroke();ctx.setLineDash([]);ctx.restore();
   ctx.globalAlpha=show;drawShadow(ctx,shadow,cx-card/2,cy-card/2,card,card,{alpha:.9});
   roundedImage(ctx,art.image,cx-card/2,cy-card/2,card,card,u*.016);
+  // Glass glint: a narrow highlight crosses the card every 7 s, as if the cover were behind glass.
+  const glint=((s.t%7)/7)*2.4-.7;if(glint>-.3&&glint<1.3){ctx.save();ctx.beginPath();ctx.roundRect(cx-card/2,cy-card/2,card,card,u*.016);ctx.clip();const gx=cx-card/2+glint*card,band=ctx.createLinearGradient(gx-card*.18,cy-card/2,gx+card*.18,cy+card/2);band.addColorStop(0,'rgba(255,255,255,0)');band.addColorStop(.5,'rgba(255,255,255,.16)');band.addColorStop(1,'rgba(255,255,255,0)');ctx.fillStyle=band;ctx.fillRect(cx-card/2,cy-card/2,card,card);ctx.restore();}
   ctx.strokeStyle='rgba(255,255,255,.14)';ctx.lineWidth=1;ctx.beginPath();ctx.roundRect(cx-card/2,cy-card/2,card,card,u*.016);ctx.stroke();ctx.globalAlpha=1;
   // Heading under the card.
   const align=L.align,rise=(1-show)*u*.025;
@@ -50,8 +51,7 @@ export default function albumblur(input){
   text(ctx,stamp(local),bx,by+u*.03,{size:u*.016,color:'rgba(235,240,250,.75)',spacing:.05});
   text(ctx,stamp(s.duration),bx+bw,by+u*.03,{size:u*.016,color:'rgba(235,240,250,.75)',spacing:.05,align:'right'});
   // Brand and playlist title.
-  text(ctx,base.brand,portrait?u*.08:W*.075,L.top,{size:u*.018,weight:700,color:'rgba(240,244,252,.9)',spacing:.26,maxWidth:W*.4});
-  text(ctx,base.playlist,portrait?W-u*.08:W*.925,L.top,{size:u*.018,weight:500,color:'rgba(240,244,252,.72)',spacing:.12,align:'right',maxWidth:W*.42});
+  text(ctx,base.headline,portrait?W/2:W*.075,L.top,{size:u*.026,weight:800,color:'rgba(244,247,253,.94)',spacing:.02,align:portrait?'center':'left',maxWidth:portrait?u*.84:W*.85});
   // Lyrics (or the track list) through a highlighted band.
   const {index,ease}=base.rollState(s),dim=[214,220,232],hot=[255,255,255];
   const highlight=(g,x,y,w,h)=>{const band=g.createLinearGradient(x,0,x+w,0);band.addColorStop(0,rgba(art.deep,.0));band.addColorStop(.12,rgba(art.deep,.62));band.addColorStop(.88,rgba(art.deep,.62));band.addColorStop(1,rgba(art.deep,0));g.fillStyle=band;g.fillRect(x,y+h*.06,w,h*.88);g.fillStyle=rgba(accent,.9);g.fillRect(x+w*.06,y+h*.06,Math.max(2,u*.004),h*.88);};

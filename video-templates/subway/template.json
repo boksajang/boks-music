@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "subway",
+  "name": "지하철 노선도",
+  "description": "곡이 역이 되는 노선도 위를 열차가 달리고, 안내 표시기에 이번 곡과 다음 곡이 흐릅니다 (경음악 전용)",
+  "order": 21,
+  "renderer": "canvas",
+  "scene": "subway",
+  "maxResolution": 2160,
+  "modes": [
+    "instrumental"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "blocks",
+    "dots",
+    "bars",
+    "round-bars",
+    "mirror"
+  ],
+  "recommendedSpectrum": "blocks"
+}

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "swiss",
+  "name": "스위스 포스터",
+  "description": "그리드 포스터의 색 블록이 줄마다 미끄러지고, 큰 가사와 전체 곡 목록이 함께 보입니다",
+  "order": 17,
+  "renderer": "canvas",
+  "scene": "swiss",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "mirror",
+    "blocks",
+    "dots",
+    "wave",
+    "double-wave",
+    "area",
+    "mirror-area"
+  ],
+  "recommendedSpectrum": "bars"
+}

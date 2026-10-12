@@ -1,4 +1,4 @@
-import {sceneBase,createRoll,blurredCover,drawDrift,discTexture,drawDisc,shadowSprite,drawShadow,makeParticles,drawParticles,radialGlow,vignette,drawSpectrum,equalizer,glyph,text,fitText,drawBlock,progressBar,stamp,rgba,mix,layer,hash,easeOut} from '../canvas-kit.mjs';
+import {sceneBase,createRoll,blurredCover,drawDrift,discTexture,drawDisc,shadowSprite,drawShadow,radialGlow,vignette,drawSpectrum,equalizer,glyph,text,fitText,drawBlock,progressBar,stamp,rgba,mix,layer,hash,easeOut} from '../canvas-kit.mjs';
 
 /**
  * 플레이리스트 보드 (instrumental): the whole playlist is the subject. A printed CD turns on the left;
@@ -9,7 +9,7 @@ export default function tracklist(input){
  const L=portrait
   ?{disc:[W/2,H*.24,u*.28],title:H*.42,info:H*.475,bar:[u*.12,H*.53,u*.76],controls:H*.585,panel:[u*.06,H*.635,u*.88,H*.33],rowH:u*.075,top:H*.045}
   :{disc:[W*.25,H*.4,H*.25],title:H*.72,info:H*.79,bar:[W*.1,H*.85,W*.3],controls:H*.92,panel:[W*.5,H*.1,W*.44,H*.8],rowH:H*.072,top:H*.075};
- const [cx,cy,R]=L.disc,shadow=shadowSprite(256,{alpha:.65,round:true}),particles=makeParticles(hash('tracklist'),26),roll=createRoll();
+ const [cx,cy,R]=L.disc,shadow=shadowSprite(256,{alpha:.65,round:true}),roll=createRoll();
  const covers=new Map(),discs=new Map(),titles=new Map(),measure=layer(8,8).getContext('2d');
  const backdrop=i=>{if(!covers.has(i)){if(covers.size>3)covers.delete(covers.keys().next().value);covers.set(i,blurredCover(base.art(i).image,W/H,{blur:.05,dim:.1}));}return covers.get(i);};
  const disc=i=>{if(!discs.has(i)){if(discs.size>3)discs.delete(discs.keys().next().value);discs.set(i,discTexture(Math.round(R*2.2),{kind:'cd',art:base.art(i).image,accent:base.art(i).accent}));}return discs.get(i);};
@@ -24,7 +24,6 @@ export default function tracklist(input){
   drawDrift(ctx,backdrop(i),W,H,s.t,{zoom:1.22,seed:3,alpha:i>0?s.enter:1});
   ctx.fillStyle=rgba(mix(art.deep,[6,8,14],.3),.5);ctx.fillRect(0,0,W,H);
   vignette(ctx,W,H,{alpha:.5});
-  drawParticles(ctx,particles,s.t,{width:W,height:H,color:art.soft,size:u*.009,alpha:.3,level:energy.level});
   // CD with a glow that follows the bass.
   radialGlow(ctx,cx,cy,R*2.1,art.glow,.22+energy.low*.3);
   drawShadow(ctx,shadow,cx-R,cy-R,R*2,R*2,{alpha:.8,offsetY:.05,spread:1.2});
@@ -33,14 +32,14 @@ export default function tracklist(input){
   // Now playing: title, playlist, progress, controls.
   const rise=(1-show)*u*.02;
   drawBlock(ctx,titleOf(i),W*(portrait?.5:.25),L.title+rise,{color:'#fff',align:'center',alpha:show});
-  text(ctx,[base.playlist,`${i+1} / ${tracks.length}`].filter(Boolean).join('  ·  '),W*(portrait?.5:.25),L.info+rise,{size:u*.019,weight:500,color:rgba(art.soft,.9),spacing:.06,align:'center',maxWidth:portrait?u*.84:W*.4,alpha:show});
+  text(ctx,`TRACK ${String(i+1).padStart(2,'0')} / ${String(tracks.length).padStart(2,'0')}`,W*(portrait?.5:.25),L.info+rise,{size:u*.019,weight:500,color:rgba(art.soft,.9),spacing:.06,align:'center',maxWidth:portrait?u*.84:W*.4,alpha:show});
   const [bx,by,bw]=L.bar;progressBar(ctx,bx,by,bw,u*.004,s.progress,{fill:'rgba(255,255,255,.95)',track:'rgba(255,255,255,.2)',knob:u*.007});
   text(ctx,stamp(local),bx,by+u*.032,{size:u*.015,color:'rgba(255,255,255,.7)'});text(ctx,stamp(s.duration),bx+bw,by+u*.032,{size:u*.015,color:'rgba(255,255,255,.7)',align:'right'});
   const mid=bx+bw/2,gap=u*.085;[['repeat',-2],['prev',-1],['next',1],['shuffle',2]].forEach(([name,k])=>glyph(ctx,name,mid+k*gap,L.controls,u*(Math.abs(k)===2?.026:.032),Math.abs(k)===2?'rgba(255,255,255,.55)':'rgba(255,255,255,.9)'));
   ctx.strokeStyle='rgba(255,255,255,.9)';ctx.lineWidth=Math.max(1.5,u*.003);ctx.beginPath();ctx.arc(mid,L.controls,u*.036,0,Math.PI*2);ctx.stroke();glyph(ctx,'pause',mid,L.controls,u*.026,'#fff');
   // Track list panel.
   ctx.fillStyle='rgba(255,255,255,.07)';ctx.beginPath();ctx.roundRect(px,py,pw,ph,u*.025);ctx.fill();ctx.strokeStyle='rgba(255,255,255,.1)';ctx.lineWidth=1;ctx.stroke();
-  text(ctx,'PLAYLIST',px+u*.04,py+u*.055,{size:u*.017,weight:800,color:rgba(art.soft),spacing:.24,baseline:'middle'});
+  text(ctx,base.headline||'PLAYLIST',px+u*.04,py+u*.055,{size:u*.027,weight:800,color:'#fff',spacing:.01,baseline:'middle',maxWidth:pw-u*.3});
   text(ctx,`${tracks.length}곡 · ${stamp(totalTime)}`,px+pw-u*.04,py+u*.055,{size:u*.017,weight:500,color:'rgba(255,255,255,.65)',align:'right',baseline:'middle'});
   ctx.fillStyle='rgba(255,255,255,.1)';ctx.fillRect(px+u*.04,py+head-u*.012,pw-u*.08,1);
   const index=i,ease=easeOut(local/.7),size=u*.027;
@@ -50,7 +49,6 @@ export default function tracklist(input){
     if(n===index)equalizer(g,x+u*.025,cyRow-size*.42,size*.9,size*.84,s.frame?.bins,rgba(art.soft));else text(g,String(n+1).padStart(2,'0'),x+u*.025,cyRow,{size:size*.85,weight:600,color,baseline:'middle',alpha:.55+.45*e});
     text(g,track.title||'',x+u*.025+size*2.2,cyRow,{size,weight:e>.5?800:500,color,baseline:'middle',maxWidth:w-size*6.4,alpha:.55+.45*e});
     text(g,stamp(Number(track.duration)||0),x+w-u*.025,cyRow,{size:size*.8,color,align:'right',baseline:'middle',alpha:.55+.45*e});g.globalAlpha=1;}});
-  text(ctx,base.brand,portrait?u*.06:W*.06,L.top,{size:u*.017,weight:700,color:'rgba(255,255,255,.88)',spacing:.26,maxWidth:portrait?W*.8:W*.38});
  }
  return {draw,duration:base.total};
 }

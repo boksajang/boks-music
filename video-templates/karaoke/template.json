@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "karaoke",
+  "name": "노래방",
+  "description": "노래방처럼 두 줄 가사가 번갈아 놓이고, 부르는 만큼 색이 칠해지며 카운트다운 점이 사라집니다",
+  "order": 16,
+  "renderer": "canvas",
+  "scene": "karaoke",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal"
+  ],
+  "requiresBackground": true,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "round-bars",
+    "mirror",
+    "blocks",
+    "dots",
+    "wave",
+    "double-wave",
+    "area"
+  ],
+  "recommendedSpectrum": "mirror"
+}

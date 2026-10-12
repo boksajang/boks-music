@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "radio",
+  "name": "빈티지 라디오",
+  "description": "곡마다 다이얼 위 방송국으로 바늘이 미끄러지고, 매직아이가 음악에 반응합니다 (경음악 전용)",
+  "order": 18,
+  "renderer": "canvas",
+  "scene": "radio",
+  "maxResolution": 2160,
+  "modes": [
+    "instrumental"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "round-bars",
+    "bars",
+    "mirror",
+    "dots",
+    "wave",
+    "area",
+    "mirror-area"
+  ],
+  "recommendedSpectrum": "round-bars"
+}
