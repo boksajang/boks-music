@@ -18,11 +18,12 @@ export async function probeVideoEncoder(ffmpegPath,{signal,log=()=>{},platform=p
  if(!encoder)return {encoder:'libx264',hardware:false};
  try{await runVideoProcess(ffmpegPath,['-hide_banner','-nostdin','-v','error','-f','lavfi','-i','color=size=640x360:rate=30','-frames:v','3','-c:v',encoder,'-f','null','-'],{signal,log});return {encoder,hardware:true};}catch(error){signal?.throwIfAborted();log(`하드웨어 인코더를 사용할 수 없어 CPU 인코딩을 사용합니다: ${error.message}`);return {encoder:'libx264',hardware:false};}
 }
-export async function renderPlaylistVideo({tracks,options:input,outputPath,ffmpegPath,backgroundPath,workDir,packageRoot},{signal,onProgress=()=>{},log=()=>{}}={}){
+export async function renderPlaylistVideo({tracks,options:input,outputPath,overwrite=false,ffmpegPath,backgroundPath,workDir,packageRoot},{signal,onProgress=()=>{},log=()=>{}}={}){
  const options=validateVideoOptions(input),template=getVideoTemplate(options.template);
  if(!Array.isArray(tracks)||!tracks.length||tracks.length>500)throw Error('내보낼 음악을 선택하세요.');
  if(!path.isAbsolute(outputPath)||path.extname(outputPath).toLowerCase()!=='.'+options.format)throw Error('출력 파일 경로와 형식이 일치해야 합니다.');
- try{await stat(outputPath);throw Error('같은 이름의 파일이 이미 있습니다.');}catch(error){if(error.code!=='ENOENT')throw error;}
+ // The user chose to overwrite an existing video of the same name; otherwise an existing file is never replaced.
+ if(!overwrite)try{await stat(outputPath);throw Error('같은 이름의 파일이 이미 있습니다.');}catch(error){if(error.code!=='ENOENT')throw error;}
  if(!ffmpegPath)throw Error('FFmpeg 설치가 필요합니다.');
  const runtime=await ensureVideoRuntime(packageRoot,{signal,onProgress,log});
  if(workDir)await mkdir(workDir,{recursive:true});
@@ -38,7 +39,9 @@ export async function renderPlaylistVideo({tracks,options:input,outputPath,ffmpe
   const sources=await Promise.all(['./video-composition.mjs','./video-spectrum.mjs','./hyperframes-worker.mjs','./playlist-video.mjs','./hyperframes-render.mjs','./canvas-scene.mjs',...CANVAS_SCENE_FILES,'./canvas-render.mjs','./canvas-render/page.mjs'].map(f=>readFile(fileURLToPath(new URL(f,import.meta.url)),'utf8')));
   const cacheKey=createHash('sha256').update(JSON.stringify({pipelineVersion:3,version:runtime.version,source:sources,identity,options:{...options,repeat:1,format:'mp4'},theme:template.themeCss,background:backgroundPath?await hashFile(backgroundPath):null})).digest('hex');
   const cacheDirectory=path.join(runtime.directory,'render-cache');await mkdir(cacheDirectory,{recursive:true});const cached=path.join(cacheDirectory,cacheKey+'.mp4'),receipt=path.join(cacheDirectory,cacheKey+'.json');
-  try{const meta=JSON.parse(await readFile(receipt,'utf8'));if(meta.sha256===await hashFile(cached)){await copyFile(cached,cycle,constants.COPYFILE_EXCL);cacheHit=true;encoder=meta.encoder;onProgress({stage:'동일한 영상 구성 재사용 중',progress:90});}}catch(error){if(error.code!=='ENOENT')log('영상 캐시를 다시 생성합니다: '+error.message);}
+  try{const meta=JSON.parse(await readFile(receipt,'utf8'));if(meta.sha256===await hashFile(cached)){await copyFile(cached,cycle,constants.COPYFILE_EXCL);cacheHit=true;encoder=meta.encoder;
+   // The receipt names every song this entry was made from, so deleting a song removes it.
+   const owners=[...new Set([...(Array.isArray(meta.trackIds)?meta.trackIds:[]),...prepared.map(t=>t.id).filter(Boolean)])];if(owners.length!==(meta.trackIds||[]).length)await writeFile(receipt,JSON.stringify({...meta,trackIds:owners}));onProgress({stage:'동일한 영상 구성 재사용 중',progress:90});}}catch(error){if(error.code!=='ENOENT')log('영상 캐시를 다시 생성합니다: '+error.message);}
   if(!cacheHit){
    for(let i=0;i<prepared.length;i++){
     signal?.throwIfAborted();const track=prepared[i];onProgress({stage:`오디오 분석 ${i+1}/${prepared.length}`,progress:i/prepared.length*8});
@@ -64,7 +67,7 @@ export async function renderPlaylistVideo({tracks,options:input,outputPath,ffmpe
    }
    // Cache video alone: AAC priming must never determine the visual repeat period.
    await run([...common,'-i',rawVideo,'-map','0:v:0','-c:v','copy','-an',cycle]);
-   signal?.throwIfAborted();const tempCache=cached+'.'+randomUUID()+'.tmp';await copyFile(cycle,tempCache);await rename(tempCache,cached);await writeFile(receipt,JSON.stringify({sha256:await hashFile(cached),encoder,duration:cycleDuration,createdAt:new Date().toISOString()}));
+   signal?.throwIfAborted();const tempCache=cached+'.'+randomUUID()+'.tmp';await copyFile(cycle,tempCache);await rename(tempCache,cached);await writeFile(receipt,JSON.stringify({sha256:await hashFile(cached),encoder,duration:cycleDuration,trackIds:prepared.map(t=>t.id).filter(Boolean),createdAt:new Date().toISOString()}));
   }
   signal?.throwIfAborted();onProgress({stage:options.repeat>1?'반복 영상과 원본 음악 결합 중':'영상 파일 저장 중',progress:94});
   for(let i=0;i<prepared.length;i++)if(!prepared[i].wav){prepared[i].wav=path.join(projectDir,`audio-${i}.wav`);await run([...common,'-i',prepared[i].audioPath,'-map','0:a:0','-vn','-ac','2','-ar','48000','-c:a','pcm_f32le','-rf64','auto',prepared[i].wav]);}
@@ -80,8 +83,13 @@ export async function renderPlaylistVideo({tracks,options:input,outputPath,ffmpe
   const rational=s=>{const [a,b]=String(s||'0/1').split('/').map(Number);return a/b;};
   if(video?.codec_name!=='h264'||video.width!==options.width||video.height!==options.height||audio?.codec_name!=='aac'||Number(video.nb_frames)!==frames||Math.abs(rational(video.r_frame_rate)-options.fps)>.001||Math.abs(rational(video.avg_frame_rate)-options.fps)>.001||Math.abs(Number(probe.format?.duration)-duration)>.15+options.repeat*.025)throw Error('완성 영상의 코덱·크기·프레임 수·재생시간 검증에 실패했습니다.');
   const actualEncoder=video.tags?.encoder||'h264';encoder={...encoder,actual:actualEncoder,hardware:template.renderer==='canvas'?!!encoder.hardware:/nvenc|videotoolbox/i.test(actualEncoder)};
-  try{await link(candidate,outputPath);}catch(error){if(!['EXDEV','EPERM','ENOTSUP'].includes(error.code))throw error;await copyFile(candidate,outputPath,constants.COPYFILE_EXCL);}committed=true;signal?.throwIfAborted();
-  return {videoPath:outputPath,duration,width:options.width,height:options.height,fps:options.fps,format:options.format,frames,cycleAudioDuration:cycleDuration,cycleEndPaddingSeconds:alignedCycleDuration-cycleDuration,trackIds:Array.from({length:options.repeat},()=>tracks.map(t=>t.id)).flat(),spectrumAnalysis:'12000 Hz decoded mono PCM, 1024-point Hann FFT',renderer:template.renderer==='canvas'?'canvas-webcodecs':'hyperframes',rendererVersion:template.renderer==='canvas'?process.versions.chrome:runtime.version,encoder,cacheHit,options};
+  if(overwrite){
+   // Written next to the old file first, then swapped in, so a failure never leaves a half-written video.
+   const staged=outputPath+'.'+randomUUID()+'.boks-tmp';await copyFile(candidate,staged,constants.COPYFILE_EXCL);
+   try{await rename(staged,outputPath);}catch(error){await unlink(staged).catch(()=>{});throw error.code==='EPERM'||error.code==='EBUSY'?Error('덮어쓸 영상 파일이 다른 프로그램에서 열려 있습니다. 닫은 뒤 다시 만들어 주세요.'):error;}
+  }else try{await link(candidate,outputPath);}catch(error){if(!['EXDEV','EPERM','ENOTSUP'].includes(error.code))throw error;await copyFile(candidate,outputPath,constants.COPYFILE_EXCL);}
+  committed=true;signal?.throwIfAborted();
+  return {videoPath:outputPath,cacheKey,duration,width:options.width,height:options.height,fps:options.fps,format:options.format,frames,cycleAudioDuration:cycleDuration,cycleEndPaddingSeconds:alignedCycleDuration-cycleDuration,trackIds:Array.from({length:options.repeat},()=>tracks.map(t=>t.id)).flat(),spectrumAnalysis:'12000 Hz decoded mono PCM, 1024-point Hann FFT',renderer:template.renderer==='canvas'?'canvas-webcodecs':'hyperframes',rendererVersion:template.renderer==='canvas'?process.versions.chrome:runtime.version,encoder,cacheHit,options};
  }catch(error){if(committed)await unlink(outputPath).catch(()=>{});throw error;}
  finally{await rm(work,{recursive:true,force:true,maxRetries:20,retryDelay:200});}
 }

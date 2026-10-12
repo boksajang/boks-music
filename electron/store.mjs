@@ -7,7 +7,7 @@ import {runtimeDefaults,migrateRuntimeSettings} from './runtime-state.mjs';
 import {claudeModels,claudeEfforts,agentProviders} from './claude.mjs';
 
 export function initialState(root) {
-  return { version: 1, projects: [], tracks: [], playlists: [], videos: [], retainedAssets: [], customPresets: [], jobs: [], settings: {
+  return { version: 1, projects: [], tracks: [], playlists: [], videos: [], customPresets: [], jobs: [], settings: {
     defaultCount: 1, autoAlbumArt: false, textModel: '', imageModel: '', textReasoning: 'medium', imageReasoning: 'medium', imageEngine: 'agent', localImageModel: '', videoBrand: 'BOKS MUSIC', videoDirectory: '',
     agentProvider: '', agentChoiceConfirmed: false, claudeModel: '', claudeReasoning: 'medium',
     projectPath: path.join(root,'projects'), modelPath: path.join(root,'models'),
@@ -28,14 +28,15 @@ export class Store {
       if(!Array.isArray(data.videos)||data.videos.some(row=>!row||typeof row.id!=='string'||!row.id||typeof row.videoPath!=='string'||!path.isAbsolute(row.videoPath)||typeof row.playlistId!=='string')||new Set(data.videos.map(row=>row.id)).size!==data.videos.length)throw new Error('영상 데이터가 손상되었습니다.');
       if(!Array.isArray(data.playlists)||data.playlists.some(row=>!row||typeof row.id!=='string'||!row.id||typeof row.name!=='string'||!row.name.trim()||row.name.length>100||!Array.isArray(row.trackIds)||row.trackIds.some(id=>typeof id!=='string'||!id)||typeof row.createdAt!=='string'||typeof row.updatedAt!=='string')||new Set(data.playlists.map(row=>row.id)).size!==data.playlists.length)throw new Error('재생목록 데이터가 손상되었습니다.');
       for(const row of data.playlists)row.trackIds=[...new Set(row.trackIds)];
-      // Retired catalogs no longer drive functionality. Preserve recorded files and
-      // their deletion protection, and keep completed music available as ordinary songs.
-      data.retainedAssets=[...new Set([...(Array.isArray(data.retainedAssets)?data.retainedAssets:[]),...(Array.isArray(data.voices)?data.voices:[]).map(row=>row.audioPath)].filter(value=>typeof value==='string'&&value))];
-      delete data.voices;
-      const cleanSettings=settings=>{if(!settings)return;for(const key of Object.keys(settings))if(/voice/i.test(key))delete settings[key];if(settings.engineSelection)delete settings.engineSelection.voice;};
+      // The voice feature, its runtime and its recordings were removed (2026-10-12): drop its records and
+      // every saved setting that still names it or points into the deleted voice runtime.
+      delete data.voices;delete data.retainedAssets;
+      const voiceRuntime=/[\\/]runtimes[\\/]voice-cuda[\\/]|seed-vc/i;
+      const cleanSettings=settings=>{if(!settings||typeof settings!=='object')return;for(const key of Object.keys(settings))if(/voice/i.test(key)||(typeof settings[key]==='string'&&voiceRuntime.test(settings[key])))delete settings[key];if(settings.engineSelection)delete settings.engineSelection.voice;};
       cleanSettings(data.settings);
       for(const row of data.tracks){if(row.kind==='voice'){row.kind='song';delete row.parentId;}delete row.voiceId;delete row.voiceName;cleanSettings(row.settings);}
       for(const row of data.projects)if(row.draft)delete row.draft.voiceId;
+      for(const job of data.jobs){cleanSettings(job.request?.settings);cleanSettings(job.result);}
       for(const job of data.jobs){if(job.request){delete job.request.voiceId;delete job.request.voicePath;cleanSettings(job.request.settings);}}
       data.settings=migrateRuntimeSettings(data.settings,initialState(this.root).settings);
       for(const key of ['textReasoning','imageReasoning'])if(!['medium','high','xhigh'].includes(data.settings[key]))data.settings[key]='medium';

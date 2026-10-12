@@ -24,8 +24,9 @@ function expand(data, selected) {
 async function persist(store, change) {
   const previous=structuredClone(store.data.tracks);
   const playlists=structuredClone(store.data.playlists||[]);
+  const jobs=structuredClone(store.data.jobs||[]);
   try { change(); await store.save(); }
-  catch(error) { store.data.tracks=previous;store.data.playlists=playlists; throw error; }
+  catch(error) { store.data.tracks=previous;store.data.playlists=playlists;store.data.jobs=jobs; throw error; }
 }
 export async function moveToTrash(store, ids) {
   const selected=select(store.data,ids,false);
@@ -125,7 +126,7 @@ export async function purgeTrash(store, ids) {
   const data=store.data;
   if(data.jobs.some(job=>['queued','running'].includes(job.status))) throw new Error('진행 중인 작업을 완료하거나 취소한 뒤 영구 삭제하세요.');
   const rows=expand(data,select(data,ids,true)), removing=new Set(rows.map(row=>row.id));
-  const survivors=[...data.tracks.filter(row=>!removing.has(row.id)),...(data.retainedAssets||[]).map(audioPath=>({audioPath}))];
+  const survivors=data.tracks.filter(row=>!removing.has(row.id));
   const retained=survivors.flatMap(references);
   for(const file of [...retained]) {
     if(!path.isAbsolute(file))throw new Error('보존할 파일 경로를 확인할 수 없어 삭제를 중단했습니다.');
@@ -136,7 +137,7 @@ export async function purgeTrash(store, ids) {
   const historical=[];
   for(const job of data.jobs) {
     const operation=job.type||job.request?.operation;
-    if(!['generate','cover','voice','stems','albumArt','youtubeImport','mastering','lyricsAlign'].includes(operation))continue;
+    if(!['generate','cover','stems','albumArt','youtubeImport','mastering','lyricsAlign'].includes(operation))continue;
     const resultIds=[job.result?.trackId,...(Array.isArray(job.result?.trackIds)?job.result.trackIds:[])];
     // A mastered track has its own storage owner. Its input track does not own
     // this new job directory (in particular after moving the input project).
@@ -174,9 +175,24 @@ export async function purgeTrash(store, ids) {
       if(stat && !stat.isDirectory())throw new Error('삭제 직전 폴더 경로가 변경되었습니다.');
       if(stat)await rmdir(directory).catch(error=>{if(error.code!=='ENOENT')throw error;});
     }
-    await persist(store,()=>{data.tracks=data.tracks.filter(row=>!removing.has(row.id));for(const playlist of data.playlists||[]){const filtered=playlist.trackIds.filter(id=>!removing.has(id));if(filtered.length!==playlist.trackIds.length){playlist.trackIds=filtered;playlist.updatedAt=new Date().toISOString();}}});
+    // Finished job records that only produced or used the deleted songs go with them (video jobs stay with their videos).
+    const orphanJob=job=>{if(['queued','running'].includes(job.status)||(job.type||job.request?.operation)==='video')return false;const ids=[job.result?.trackId,...(Array.isArray(job.result?.trackIds)?job.result.trackIds:[]),job.request?.trackId].filter(Boolean);return ids.length>0&&ids.every(id=>removing.has(id));};
+    await persist(store,()=>{data.jobs=(data.jobs||[]).filter(job=>!orphanJob(job));data.tracks=data.tracks.filter(row=>!removing.has(row.id));for(const playlist of data.playlists||[]){const filtered=playlist.trackIds.filter(id=>!removing.has(id));if(filtered.length!==playlist.trackIds.length){playlist.trackIds=filtered;playlist.updatedAt=new Date().toISOString();}}});
   } catch(cause) {
     throw new Error('영구 삭제가 완료되지 않았습니다. 휴지통 항목은 보존되었습니다. 원인을 해결한 후 다시 시도하세요.',{cause});
   }
   return {deletedIds:rows.map(row=>row.id)};
+}
+
+/**
+ * Removes a file a song no longer uses (its replaced album art) when it is a managed project file and
+ * no song refers to it. Call after the song points at its new file.
+ */
+export async function releaseFile(store,row,file) {
+  const data=store.data;
+  if(typeof file!=='string'||!file||data.tracks.some(other=>references(other).some(reference=>same(reference,file))))return false;
+  let location;try{location=ownedLocation(data,row,file);}catch{return false;}
+  const stat=await checkPath(location.file);if(!stat||!stat.isFile())return false;
+  await unlink(location.file).catch(error=>{if(error.code!=='ENOENT')throw error;});
+  return true;
 }
