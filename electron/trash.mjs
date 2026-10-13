@@ -3,6 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {lstat, readdir, unlink, rmdir} from 'node:fs/promises';
 import {realpath as resolvePath} from 'node:fs';
 import {promisify} from 'node:util';
+import {assertTracksIdle,busyProjectIds} from './job-tracks.mjs';
 
 const realpath=promisify(resolvePath);
 
@@ -31,8 +32,8 @@ async function persist(store, change) {
 export async function moveToTrash(store, ids) {
   const selected=select(store.data,ids,false);
   if(selected.some(row=>row.kind==='stem')) throw new Error('Stem은 원곡과 함께 휴지통으로 이동하세요.');
-  if(store.data.jobs.some(job=>['queued','running'].includes(job.status))) throw new Error('진행 중인 작업을 완료하거나 취소한 뒤 휴지통으로 이동하세요.');
   const rows=[...new Set([...selected,...store.data.tracks.filter(row=>row.kind==='stem' && !row.trashedAt && selected.some(parent=>parent.id===row.parentId))])];
+  assertTracksIdle(store.data,rows,'휴지통으로 이동하세요');
   const trashedAt=new Date().toISOString(), trashBatchId=randomUUID();
   await persist(store,()=>{for(const row of rows) Object.assign(row,{trashedAt,trashBatchId});});
   return {movedIds:rows.map(row=>row.id)};
@@ -56,8 +57,9 @@ export async function restoreFromTrash(store, ids, targetProjectId) {
 export async function deleteProject(store, id) {
   const item=store.data.projects.find(row=>row.id===id&&!row.deletedAt);
   if(!item) throw new Error('프로젝트를 찾을 수 없습니다.');
-  if(store.data.jobs.some(job=>['queued','running'].includes(job.status))) throw new Error('진행 중인 작업을 완료하거나 취소한 뒤 프로젝트를 삭제하세요.');
+  if(busyProjectIds(store.data).has(id)) throw new Error('이 프로젝트의 작업이 끝나거나 취소된 뒤 프로젝트를 삭제하세요.');
   const rows=store.data.tracks.filter(row=>row.projectId===id&&!row.trashedAt);
+  assertTracksIdle(store.data,rows,'프로젝트를 삭제하세요');
   const trashedAt=new Date().toISOString(), trashBatchId=randomUUID();
   try { await persist(store,()=>{for(const row of rows) Object.assign(row,{trashedAt,trashBatchId});item.deletedAt=trashedAt;}); }
   catch(error) { delete item.deletedAt; throw error; }
@@ -124,8 +126,8 @@ async function treePlan(root, data) {
 }
 export async function purgeTrash(store, ids) {
   const data=store.data;
-  if(data.jobs.some(job=>['queued','running'].includes(job.status))) throw new Error('진행 중인 작업을 완료하거나 취소한 뒤 영구 삭제하세요.');
   const rows=expand(data,select(data,ids,true)), removing=new Set(rows.map(row=>row.id));
+  assertTracksIdle(data,rows,'영구 삭제하세요');
   const survivors=data.tracks.filter(row=>!removing.has(row.id));
   const retained=survivors.flatMap(references);
   for(const file of [...retained]) {

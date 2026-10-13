@@ -34,50 +34,19 @@
 
 곡 사이에는 앨범·제목이 바뀌는 전환이 있습니다. 앨범아트의 대표 색이 장면의 강조색이 되며, 앨범아트가 없는 곡은 제목으로 만든 추상 이미지를 사용합니다.
 
-## 직접 추가하는 HTML 템플릿
+## 템플릿 정보 파일
 
-영상 만들기의 **템플릿 폴더 열기**로 이 폴더를 엽니다. 새 폴더에 `template.json`과 `theme.css`를 두고 **새로고침**을 누르면, 앱 소스를 수정하지 않고 템플릿이 추가됩니다. HTML 템플릿은 HyperFrames로 렌더링하므로 GPU 장면보다 느립니다.
-
-```json
-{
-  "schemaVersion": 1,
-  "id": "my-template",
-  "name": "나의 템플릿",
-  "description": "선택 화면에 보일 설명",
-  "aspects": ["16:9", "9:16"],
-  "modes": ["vocal", "instrumental"],
-  "spectra": ["bars", "wave"],
-  "recommendedSpectrum": "bars",
-  "requiresBackground": false,
-  "stylesheet": "theme.css"
-}
-```
+각 폴더의 `template.json`은 앱에 들어 있는 GPU 장면 하나의 이름·설명과 지원 범위를 정합니다. 장면 자체는 앱 코드이므로 HTML·CSS로 새 장면을 추가하는 방식은 지원하지 않습니다.
 
 | 항목 | 설명 |
 |---|---|
 | 폴더 이름·`id` | 같은 이름을 씁니다. 영문 소문자·숫자·하이픈만 사용합니다 |
+| `renderer`·`scene` | 항상 `canvas`이며, `scene`은 `electron/canvas-scenes/`에 등록된 장면 ID입니다 |
 | `aspects` | 지원 비율입니다 |
 | `modes` | 사용할 영상 종류입니다(`vocal` 가사 영상, `instrumental` 경음악 영상). 생략하면 둘 다 지원합니다 |
 | `spectra`·`recommendedSpectrum` | 배치에 어울리는 스펙트럼 ID와 기본값입니다 |
 | `requiresBackground` | `true`이면 사용자가 배경 사진을 고를 수 있습니다 |
-| `theme.css` | 배치·색·글꼴 크기를 정합니다. 외부 파일을 불러오는 `url()`과 `@import`는 쓸 수 없습니다 |
-
-공통 요소는 다음과 같습니다. 세로 화면에는 `.portrait`가 붙으므로 `.portrait .art`처럼 따로 배치합니다.
-
-| 선택자 | 요소 |
-|---|---|
-| `.scene` | 전체 장면 |
-| `.topline .brand` | 타이틀 문구 |
-| `.topline .collection` | 영상 이름 |
-| `.art` | 앨범 이미지 |
-| `.content` | 제목과 가사 |
-| `h1` | 제목 |
-| `.lyrics` | 가사 영역 |
-| `.spectrum` | 스펙트럼 |
-| `.footer` | 제목과 재생시간 |
-| `.progress` | 진행바 |
-
-템플릿 오류는 새로고침할 때 폴더 이름과 함께 표시됩니다.
+| `maxResolution` | 최대 해상도입니다(2160 이하) |
 
 ## 스펙트럼 ID
 

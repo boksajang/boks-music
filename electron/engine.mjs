@@ -17,11 +17,25 @@ async function pythonEnvironment(settings){
   await Promise.all(Object.values(locations).map(folder=>mkdir(folder,{recursive:true})));
   return {...process.env,...locations,...(process.platform==='darwin'?{TMPDIR:locations.TEMP}:{}),PYTHONIOENCODING:'utf-8'};
 }
+// The Stem runtime check imports torch and initialises CUDA in a fresh Python. Right after the PC
+// starts this can take far longer than when warm, so it gets a generous limit; a result is reused while
+// the runtime's Python executable is unchanged, and concurrent checks share one process.
+const PROBE_TIMEOUT_MS=180000,probes=new Map();
+async function probeStemRuntime(settings,runner){
+  let stamp;try{stamp=(await stat(settings.stemPython)).mtimeMs;}catch{return {missing:true};}
+  const key=[settings.stemPython,stamp,runner,settings.modelPath].join('|');
+  if(!probes.has(key))probes.set(key,(async()=>{
+    try{const {stdout}=await exec(settings.stemPython,[runner,'--probe'],{windowsHide:true,timeout:PROBE_TIMEOUT_MS,env:await pythonEnvironment(settings)});return {result:JSON.parse(stdout.trim().split('\n').at(-1))};}
+    catch(error){probes.delete(key);return {error:error.killed||error.signal?'실행 환경 확인 시간이 초과되었습니다':'실행 환경 확인에 실패했습니다'};}
+  })());
+  return probes.get(key);
+}
+/** 시스템 재검사: checks the runtimes again instead of reusing earlier results. */
+export function clearEngineProbes(){probes.clear();}
 export async function engineStates(settings,runner) {
   const profile=hostProfile();
   const native=process.platform==='darwin'?await inspectAudioCpp(settings):await inspectNative(settings);
-  let probe={};
-  if(profile.supported&&executableMatchesHost(settings.stemPython))try{const {stdout}=await exec(settings.stemPython,[runner,'--probe'],{windowsHide:true,timeout:30000,env:await pythonEnvironment(settings)});probe=JSON.parse(stdout.trim().split('\n').at(-1));}catch{}
+  const checked=profile.supported&&executableMatchesHost(settings.stemPython)?await probeStemRuntime(settings,runner):{missing:true},probe=checked.result||{};
   const exists=async file=>{try{if(!file)return false;await access(file);return true;}catch{return false;}};
   const device=settings.stemDevice||profile.stemDevice;
   const deviceReady=device==='cuda'?!!probe.cuda:device==='mps'?!!probe.mps:device==='cpu'&&!!probe.modules?.torch;
@@ -30,8 +44,10 @@ export async function engineStates(settings,runner) {
   return [
     {id:'music',name:process.platform==='darwin'?'YuE2 / audio.cpp':'YuE2 / yue2.cpp',...native.music,capabilities:native.capabilities},
     {id:'cover',name:process.platform==='darwin'?'SheetSage2 / audio.cpp':'SheetSage2 / yue2.cpp',...native.cover},
-    {id:'stems',name:'BS-RoFormer',available:stems,message:stems?`${device.toUpperCase()} 런타임과 모델 확인됨 · 청취 검증 별도`:missing}
-  ].map(e=>({...e,engineId:defaultEngineSelection[e.id],status:e.available?'ready':'not-installed'}));
+    // A check that failed or timed out is not a missing installation: it asks for a rescan, not a reinstall.
+    checked.error?{id:'stems',name:'BS-RoFormer',available:false,status:'check-failed',message:`${checked.error}. 시스템 재검사로 다시 확인하세요.`}
+    :{id:'stems',name:'BS-RoFormer',available:stems,message:stems?`${device.toUpperCase()} 런타임과 모델 확인됨 · 청취 검증 별도`:missing}
+  ].map(e=>({...e,engineId:defaultEngineSelection[e.id],status:e.status||(e.available?'ready':'not-installed')}));
 }
 export function installedEngineChoices(states){
   return enginesForPlatform().map(entry=>{const state=states.find(e=>e.engineId===entry.id);return {...entry,available:!!state?.available,reason:state?.message||'설치가 필요합니다.'};});

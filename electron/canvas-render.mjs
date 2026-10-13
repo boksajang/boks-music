@@ -3,7 +3,7 @@ import os from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {createWriteStream} from 'node:fs';
 import {readFile,writeFile,mkdtemp,rm} from 'node:fs/promises';
-import {runVideoProcess} from './hyperframes-runtime.mjs';
+import {runVideoProcess} from './video-process.mjs';
 
 /** Output bitrate for H.264 text-heavy motion graphics (≈0.15 bit per pixel per frame). */
 export const canvasBitrate=({width,height,fps})=>Math.round(Math.min(80e6,Math.max(2.5e6,width*height*fps*.15)));

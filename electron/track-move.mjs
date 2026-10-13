@@ -1,5 +1,6 @@
 import path from 'node:path';
 import {lstat} from 'node:fs/promises';
+import {assertTracksIdle} from './job-tracks.mjs';
 
 async function checkStorage(data,row) {
   if(typeof row.audioPath!=='string'||!row.audioPath)throw new Error('곡 파일 경로가 없습니다.');
@@ -30,9 +31,9 @@ export async function moveTracks(store,ids,targetProjectId){
   const data=store.data;
   if(typeof targetProjectId!=='string'||!data.projects.some(project=>project.id===targetProjectId&&!project.deletedAt))throw new Error('이동할 프로젝트를 선택하세요.');
   if(!Array.isArray(ids)||!ids.length||ids.some(id=>typeof id!=='string')||new Set(ids).size!==ids.length)throw new Error('이동할 곡을 선택하세요.');
-  if(data.jobs.some(job=>['queued','running'].includes(job.status)))throw new Error('진행 중인 작업이 끝난 후 곡을 이동하세요.');
   const selected=ids.map(id=>data.tracks.find(row=>row.id===id));
   if(selected.some(row=>!row||row.trashedAt||row.kind==='stem'))throw new Error('휴지통에 없는 원곡 또는 Cover를 선택하세요. Stem은 원곡과 함께 이동합니다.');
+  assertTracksIdle(data,selected,'곡을 이동하세요');
   const selectedIds=new Set(ids);
   const rows=[...new Set([...selected,...data.tracks.filter(row=>row.kind==='stem'&&selectedIds.has(row.parentId))])].filter(row=>row.projectId!==targetProjectId);
   for(const row of rows)await checkStorage(data,row);

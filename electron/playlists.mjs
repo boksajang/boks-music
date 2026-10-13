@@ -20,3 +20,12 @@ export function addToPlaylist(store,{playlistId,ids:values}={}){return edit(stor
   row.trackIds=[...new Set([...row.trackIds,...selected])];row.updatedAt=new Date().toISOString();return row;
 });}
 export function removeFromPlaylist(store,{playlistId,ids:values}={}){return edit(store,()=>{const row=find(store,playlistId),selected=new Set(ids(values));if([...selected].some(id=>!row.trackIds.includes(id)))throw new Error('재생목록에 있는 곡만 제거할 수 있습니다.');row.trackIds=row.trackIds.filter(id=>!selected.has(id));row.updatedAt=new Date().toISOString();return row;});}
+/**
+ * New order for songs of a playlist (the video window's list). The given songs take the places those
+ * songs held, in the given order; songs the caller did not list (in the trash, for example) keep theirs.
+ */
+export function reorderPlaylist(store,{playlistId,ids:values}={}){return edit(store,()=>{
+  const row=find(store,playlistId),order=ids(values),selected=new Set(order);
+  if(order.length!==values.length||order.some(id=>!row.trackIds.includes(id)))throw new Error('재생목록에 있는 곡의 순서만 바꿀 수 있습니다.');
+  let next=0;row.trackIds=row.trackIds.map(id=>selected.has(id)?order[next++]:id);row.updatedAt=new Date().toISOString();return row;
+});}

@@ -1,4 +1,3 @@
-import {interpolateAnalysisFrame} from './video-composition.mjs';
 
 /**
  * Shared drawing kit for the GPU canvas scenes. Every motion is a function of the frame time, so the
@@ -340,4 +339,15 @@ export function trackRow(g,{number,title,duration},x,top,w,rowH,emphasis,{size,d
  text(g,title,x+size*2.3,cy,{size,weight:emphasis>.5?700:500,color,baseline:'middle',spacing:-.01,maxWidth:w-size*2.3-timeW-size*.6});
  if(showTime)text(g,stamp(duration),x+w,cy,{size:size*.78,weight:500,color,baseline:'middle',align:'right'});
  g.globalAlpha=1;
+}
+/** Interpolate only measured neighboring frames; hold the final frame at the boundary. */
+export function interpolateAnalysisFrame(analysis,time,fallbackFps=30){
+ if(!analysis)return undefined;
+ const count=analysis.packed?Number(analysis.frameCount):analysis.frames?.length;
+ if(!count)return undefined;
+ const fps=Number(analysis.fps)||fallbackFps,position=Math.max(0,Math.min(count-1,(Number(time)||0)*fps)),left=Math.floor(position),right=Math.min(count-1,left+1),mix=position-left;
+ const sample=(index)=>analysis.packed?{bins:Array.from(analysis.packed.subarray(index*192,index*192+64),n=>n/255),waveform:Array.from(analysis.packed.subarray(index*192+64,index*192+192),n=>(n>127?n-256:n)/127)}:analysis.frames[index];
+ const a=sample(left);if(!a||mix===0||left===right)return a;const b=sample(right);if(!b)return a;
+ const blend=(first=[],second=[])=>Array.from(first,(value,index)=>{const next=second[index];return Number.isFinite(next)?value+(next-value)*mix:value;});
+ return {bins:blend(a.bins,b.bins),waveform:blend(a.waveform,b.waveform)};
 }

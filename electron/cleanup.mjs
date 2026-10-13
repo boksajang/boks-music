@@ -3,30 +3,16 @@ import {readdir,readFile,rm,stat} from 'node:fs/promises';
 
 /**
  * Removal of data the app keeps outside the song and project folders, so deleting a song or a
- * video leaves nothing behind: the video render cache, separated vocals kept for lyric analysis and
- * the per-job work folders of video jobs.
+ * video leaves nothing behind: separated vocals kept for lyric analysis and the per-job work folders
+ * of video jobs.
  */
 
-/** Render-cache entries (`<key>.mp4` + `<key>.json` receipt) that belong to the given songs or keys. */
-export async function removeRenderCache(directory,{trackIds=[],cacheKeys=[],unattributed=false}={}){
- const tracks=new Set(trackIds),keys=new Set(cacheKeys),removed=[];
- let names;try{names=await readdir(directory);}catch(error){if(error.code==='ENOENT')return removed;throw error;}
- const receipts=new Set(names.filter(name=>name.endsWith('.json')).map(name=>name.slice(0,-5)));
- for(const key of receipts){
-  if(!/^[a-f0-9]{64}$/.test(key))continue;
-  let receipt=null;try{receipt=JSON.parse(await readFile(path.join(directory,key+'.json'),'utf8'));}catch{receipt=null;}
-  const owners=Array.isArray(receipt?.trackIds)?receipt.trackIds:null;
-  // Entries written before receipts named their songs cannot be attributed: removed with any deletion.
-  if(keys.has(key)||(owners&&owners.some(id=>tracks.has(id)))||(!owners&&unattributed)){
-   await rm(path.join(directory,key+'.mp4'),{force:true});await rm(path.join(directory,key+'.json'),{force:true});removed.push(key);
-  }
- }
- // Interrupted writes and videos whose receipt is gone are never reused: always removed.
- for(const name of names){
-  const temporary=/\.tmp$/.test(name),orphan=name.endsWith('.mp4')&&!receipts.has(name.slice(0,-4));
-  if(temporary||orphan)await rm(path.join(directory,name),{force:true});
- }
- return removed;
+/** Total size in bytes of the files under a folder (0 when it does not exist). */
+export async function folderSize(directory){
+ let total=0,entries;
+ try{entries=await readdir(directory,{withFileTypes:true});}catch(error){if(['ENOENT','ENOTDIR'].includes(error.code))return 0;throw error;}
+ for(const entry of entries){const target=path.join(directory,entry.name);if(entry.isDirectory())total+=await folderSize(target);else if(entry.isFile())try{total+=(await stat(target)).size;}catch{}}
+ return total;
 }
 
 /** Separated-vocal cache files for the given keys (and their interrupted temporary copies). */

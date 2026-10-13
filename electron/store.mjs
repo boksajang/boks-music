@@ -8,7 +8,7 @@ import {claudeModels,claudeEfforts,agentProviders} from './claude.mjs';
 
 export function initialState(root) {
   return { version: 1, projects: [], tracks: [], playlists: [], videos: [], customPresets: [], jobs: [], settings: {
-    defaultCount: 1, autoAlbumArt: false, textModel: '', imageModel: '', textReasoning: 'medium', imageReasoning: 'medium', imageEngine: 'agent', localImageModel: '', videoBrand: 'BOKS MUSIC', videoDirectory: '',
+    defaultCount: 1, autoAlbumArt: false, textModel: '', imageModel: '', textReasoning: 'medium', imageReasoning: 'medium', imageEngine: 'agent', localImageModel: '', videoBrand: 'BOKS MUSIC', videoDirectory: '', videoOptions: {}, videoPresets: [],
     agentProvider: '', agentChoiceConfirmed: false, claudeModel: '', claudeReasoning: 'medium',
     projectPath: path.join(root,'projects'), modelPath: path.join(root,'models'),
     engineSelection:{...defaultEngineSelection}, musicBackend: 'yue2-cpp', nativeBackend: 'cuda', nativeExecutable: '', backbonePath: '', vaePath: '', transcriberPath: '',
@@ -46,6 +46,8 @@ export class Store {
       if(typeof data.settings.localImageModel!=='string')data.settings.localImageModel='';
       if(typeof data.settings.videoBrand!=='string'||data.settings.videoBrand.length>40)data.settings.videoBrand='BOKS MUSIC';
       if(typeof data.settings.videoDirectory!=='string')data.settings.videoDirectory='';
+      if(!data.settings.videoOptions||typeof data.settings.videoOptions!=='object'||Array.isArray(data.settings.videoOptions))data.settings.videoOptions={};
+      if(!Array.isArray(data.settings.videoPresets)||data.settings.videoPresets.some(item=>!item||typeof item.name!=='string'||!item.options||typeof item.options!=='object'))data.settings.videoPresets=[];
       if(!claudeModels.some(model=>model.id===data.settings.claudeModel))data.settings.claudeModel='';
       if(!claudeEfforts.includes(data.settings.claudeReasoning))data.settings.claudeReasoning='medium';
       if(data.claudeUsage!==undefined&&(!data.claudeUsage||typeof data.claudeUsage!=='object'||data.claudeUsage.state!=='ready'))delete data.claudeUsage;
@@ -62,10 +64,13 @@ export class Store {
       }
     }
     for(const job of this.data.jobs) if(['queued','running'].includes(job.status)) Object.assign(job,{status:'interrupted',stage:'앱 종료로 중단됨',error:'앱이 종료되어 중단되었습니다. 다시 실행하세요.',finishedAt:new Date().toISOString()});
+    // Their work folders are removed by the app once it knows the project folders are idle.
+    this.prunedJobs=pruneJobs(this.data);
     await this.save(); return this;
   }
   save() {
-    const json = JSON.stringify(this.data,null,2);
+    // Compact: the library is rewritten on every change.
+    const json = JSON.stringify(this.data);
     const op = this.pending.then(async()=>{
       const temp=this.file+'.tmp';
       await writeFile(temp,json,'utf8');
@@ -75,6 +80,23 @@ export class Store {
     this.pending=op.catch(()=>{}); return op;
   }
   async mutate(fn) { const result=fn(this.data); await this.save(); return result; }
+}
+/**
+ * Job records are history once finished. A non-video job finished more than 30 days ago goes unless a
+ * song still uses it: songs inside a job folder are owned through that job's record (moving and deleting
+ * them check it), and results that name songs stay. Video jobs stay (the video studio finds each
+ * playlist's latest attempt among them). Finished jobs drop their copy of the settings, which only jobs
+ * that can run again (waiting, interrupted, failed) need. Returns the removed jobs.
+ */
+export function pruneJobs(data,now=Date.now()){
+  const old=job=>Date.parse(job.finishedAt||job.createdAt)<now-30*24*3600*1000;
+  const usedFolders=new Set(),songs=new Set(data.tracks.map(row=>row.id));
+  for(const row of data.tracks)for(const file of [row.audioPath,row.artPath])if(typeof file==='string'){const parts=path.resolve(file).split(path.sep);const at=parts.lastIndexOf('jobs');if(at>=0&&parts[at+1])usedFolders.add(parts[at+1]);}
+  const inUse=job=>usedFolders.has(job.id)||[job.result?.trackId,...(Array.isArray(job.result?.trackIds)?job.result.trackIds:[])].some(id=>songs.has(id));
+  const removed=data.jobs.filter(job=>job.type!=='video'&&['completed','cancelled','resumed','failed'].includes(job.status)&&old(job)&&!inUse(job));
+  const gone=new Set(removed);data.jobs=data.jobs.filter(job=>!gone.has(job));
+  for(const job of data.jobs)if(['completed','cancelled','resumed'].includes(job.status)&&job.request?.settings)delete job.request.settings;
+  return removed;
 }
 export function requiredString(value,label,max=20000) {
   if(typeof value!=='string'||!value.trim()||value.length>max) throw new Error(`${label}을(를) 확인하세요.`);

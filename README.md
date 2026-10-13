@@ -26,12 +26,12 @@ npm start
 
 | 경로 | 내용 |
 |---|---|
-| `engine-packages/runtimes/` | 실행 엔진: yue2.cpp, Stem 분리 Python 환경(FFmpeg 포함), 가사 정렬, stable-diffusion.cpp, 영상 렌더러 |
+| `engine-packages/runtimes/` | 실행 엔진: yue2.cpp, Stem 분리 Python 환경(FFmpeg 포함), 가사 정렬, stable-diffusion.cpp |
 | `engine-packages/gguf/` | YuE2 음악 모델·VAE, SheetSage2 Cover 분석 모델 |
 | `engine-packages/models/` | 가사 정렬 모델, 로컬 이미지 모델 |
 | `engine-packages/stems/` | BS-RoFormer 분리 모델 |
 | `engine-packages/tools/` | yt-dlp |
-| `engine-packages/downloads/`, `cache/` | 내려받기 임시 파일과 캐시 |
+| `engine-packages/downloads/`, `cache/` | 내려받기 임시 파일과 엔진 캐시 |
 | 사용자 데이터 폴더 `Boks Music/` | `library.json`(목록·설정·작업 상태)과 `library.json.bak` |
 | Project 저장 위치(환경설정) | 생성·가져온 음원, Stem, 앨범아트, 영상 |
 
@@ -54,7 +54,7 @@ npm start
 | 가사 시간 정렬 | Qwen3-ASR-1.7B · Qwen3-ForcedAligner-0.6B + 가사 기반 onset 추정 | 동일 |
 | 앨범아트(로컬) | [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) (CUDA / Vulkan / CPU) + Z-Image Turbo · FLUX.2 klein 4B GGUF | stable-diffusion.cpp (Metal) |
 | 앨범아트(에이전트) | Codex CLI 이미지 도구 | 동일 |
-| 가사 영상 렌더링 | 내장 템플릿 7종: Canvas 장면(GPU) + WebCodecs 하드웨어 H.264(최대 4K) · 사용자 추가 HTML 템플릿: HyperFrames · 결합·검증: FFmpeg | 동일 |
+| 가사 영상 렌더링 | 템플릿 21종: Canvas 장면(GPU) + WebCodecs 하드웨어 H.264(최대 4K), 별도 설치 없음 · 음악 결합: FFmpeg | 동일 |
 | YouTube 가져오기 | yt-dlp + FFmpeg | 동일 |
 | AI 작사 · 앨범아트 설명문 | Claude Code CLI / Codex CLI | 동일 |
 

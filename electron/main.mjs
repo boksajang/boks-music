@@ -2,9 +2,9 @@ import {audioWaveform} from './audio-waveform.mjs';
 import {stemWaveform} from './stem-waveform.mjs';
 import {renderPlaylistVideo,validateVideoOptions} from './playlist-video.mjs';
 import {videoPreflight} from './video-preflight.mjs';
-import {readVideoTemplates,getVideoTemplate,videoTemplateDirectory} from './video-template-registry.mjs';
-import {inspectVideoRuntime,ensureVideoRuntime,runtimeDirectory as videoRuntimeDirectory} from './hyperframes-runtime.mjs';
-import {removeRenderCache,removeVocalCache,sweepVideoJobFolders} from './cleanup.mjs';
+import {readVideoTemplates,getVideoTemplate} from './video-template-registry.mjs';
+import {removeVocalCache,sweepVideoJobFolders,folderSize} from './cleanup.mjs';
+import {lyricSubtitles,videoSubtitles} from './subtitles.mjs';
 import {alignTrackLyrics,ensureLyricRuntime,inspectLyricRuntime,lyricAlignmentSupport} from './lyric-alignment.mjs';
 import {analyzeLyricBatch} from './lyric-batch.mjs';
 import {normalizeLyrics,hashLyrics,validateLyricStarts,preserveManualStarts,lyricTimingState} from './lyric-timing.mjs';
@@ -14,7 +14,7 @@ import {lyricLines} from './lyric-lines.mjs';
 import {masterAudio,validateMasteringOptions} from './mastering.mjs';
 import {commitImportedTrack} from './import-commit.mjs';
 import {moveTracks} from './track-move.mjs';
-import {createPlaylist,renamePlaylist,deletePlaylist,addToPlaylist,removeFromPlaylist} from './playlists.mjs';
+import {createPlaylist,renamePlaylist,deletePlaylist,addToPlaylist,removeFromPlaylist,reorderPlaylist} from './playlists.mjs';
 import {createYoutubeImporter,validateYoutubeUrl} from './youtube-import.mjs';
 import {validateInstrumentalDuration} from './instrumental-request.mjs';
 import {moveToTrash,restoreFromTrash,purgeTrash,deleteProject,releaseFile} from './trash.mjs';
@@ -27,7 +27,7 @@ import {constants as fsConstants} from 'node:fs';
 import {stemLabel} from './stem-label.mjs';
 import {createVocalCache} from './vocal-cache.mjs';
 import { app,BrowserWindow,ipcMain,dialog,protocol,shell,clipboard,nativeImage } from 'electron';
-import { mkdir,copyFile,stat,appendFile,realpath,rm,readFile } from 'node:fs/promises';
+import { mkdir,copyFile,stat,appendFile,realpath,rm,readFile,readdir,writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomInt} from 'node:crypto';
@@ -35,7 +35,7 @@ import {parseFile} from 'music-metadata';
 import {Store,requiredString,findById,ensureSpace,id,inside} from './store.mjs';
 import {JobQueue} from './queue.mjs';
 import {presets} from './presets.mjs';
-import {inspectSystem,engineStates,runEngine,installedEngineChoices} from './engine.mjs';
+import {inspectSystem,engineStates,clearEngineProbes,runEngine,installedEngineChoices} from './engine.mjs';
 import {installationOptions,installationRecommendation} from './compatibility.mjs';
 import {installRuntime,readInstalls} from './installer.mjs';
 import {inspectCodexInstallation,readCodexUsage,listCodexModels,generateLyrics,generateArt,writeArtPrompt as writeCodexArtPrompt,cancelCodexProcesses,validateCodexSettings} from './codex.mjs';
@@ -76,19 +76,51 @@ const trackBusy=t=>store.data.jobs.some(j=>['queued','running'].includes(j.statu
 const AGENT_JOB_TYPES=new Set(['lyrics','albumArt']);
 const runner=path.join(app.isPackaged?process.resourcesPath:root,'engines','runner.py');
 const notify=()=>{if(window&&!window.isDestroyed())window.webContents.send('boks:update');};
+// Job progress (stage, percentage, remaining time) goes to the window as a small event at most every
+// 200 ms per job instead of republishing the whole library on every engine line or rendered frame batch.
+const progressTimers=new Map();
+const sendProgress=job=>{if(progressTimers.has(job.id))return;progressTimers.set(job.id,setTimeout(()=>{progressTimers.delete(job.id);if(window&&!window.isDestroyed())window.webContents.send('boks:progress',{id:job.id,status:job.status,stage:job.stage,progress:job.progress,eta:job.eta,speed:job.speed,tokens:job.tokens});},200));};
+const fileSafe=value=>String(value||'').replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_').replace(/[. ]+$/,'').slice(0,100)||'boks';
+// Video settings kept between videos and in named presets (the scene text and output are chosen per video).
+const VIDEO_OPTION_KEYS=['mode','template','spectrum','color','aspect','resolution','fps','format','repeat','normalize'];
+const pickVideoOptions=options=>Object.fromEntries(VIDEO_OPTION_KEYS.filter(key=>options?.[key]!==undefined).map(key=>[key,options[key]]));
 const log=async(error,job='app')=>{try{await appendFile(path.join(app.getPath('userData'),'details.log'),`${new Date().toISOString()} [${job}] ${error?.stack||error}\n${error?.cause?.stack||''}\n`);}catch{}};
 const track=id=>{const row=findById(store.data.tracks,id,'곡');if(row.trashedAt)throw new Error('휴지통의 곡은 복원한 후 사용할 수 있습니다.');return row;};
 let trashBusy=false;
 // One library-wide lock serializes trash, playlist and move mutations.
 async function withLibraryLock(busyMessage,action){if(trashBusy)throw new Error(busyMessage);trashBusy=true;try{return await action();}finally{trashBusy=false;notify();}}
-async function updateTrash(action,ids){if(queue?.processing && action!==restoreFromTrash)throw new Error('진행 중인 작업이 완전히 종료된 후 다시 시도하세요.');return withLibraryLock('휴지통 처리 중입니다. 잠시 후 다시 시도하세요.',()=>action(store,ids));}
+async function updateTrash(action,ids){return withLibraryLock('휴지통 처리 중입니다. 잠시 후 다시 시도하세요.',()=>action(store,ids));}
 // Development runs with their own data folder (BOKS_DATA_DIR, used by tests) never clean the real render
 // cache: they use BOKS_RENDER_CACHE_DIR or a folder inside their data folder.
-const renderCacheDirectory=()=>{if(!app.isPackaged&&process.env.BOKS_RENDER_CACHE_DIR)return path.resolve(process.env.BOKS_RENDER_CACHE_DIR);if(!app.isPackaged&&process.env.BOKS_DATA_DIR)return path.join(app.getPath('userData'),'render-cache');return path.join(videoRuntimeDirectory(store.data.settings.modelPath),'render-cache');};
+// Videos keep nothing after they are made (every intermediate file lives in the job's work folder). Render
+// caches of earlier versions are leftovers: removed at startup and by 캐시 비우기. Development runs with
+// their own data folder (tests) only look inside that folder, never at the real engine folder.
+const renderCacheDirectories=()=>{
+  if(!app.isPackaged&&process.env.BOKS_RENDER_CACHE_DIR)return [path.resolve(process.env.BOKS_RENDER_CACHE_DIR)];
+  if(!app.isPackaged&&process.env.BOKS_DATA_DIR)return [path.join(app.getPath('userData'),'render-cache')];
+  const root=store.data.settings.modelPath;return [path.join(root,'cache','video-render'),path.join(root,'runtimes','hyperframes'),path.join(app.getPath('userData'),'render-cache')];
+};
+const videoJobsDirectory=()=>path.join(app.getPath('userData'),'video-jobs');
+const activeJobIds=()=>store.data.jobs.filter(job=>['queued','running'].includes(job.status)).map(job=>job.id);
+/** Sizes of what 캐시 비우기 removes: old render caches, video work folders of ended jobs, separated vocals. */
+async function cacheUsage(){
+  const active=new Set(activeJobIds());let work=0;
+  for(const name of await readdir(videoJobsDirectory()).catch(()=>[]))if(!active.has(name))work+=await folderSize(path.join(videoJobsDirectory(),name));
+  let render=0;for(const dir of renderCacheDirectories())render+=await folderSize(dir);
+  return {render,work,vocal:await folderSize(vocalCache().root),analysisRunning:store.data.jobs.some(job=>['queued','running'].includes(job.status)&&['lyricsAlign','video'].includes(job.type))};
+}
+async function clearCaches(){
+  const before=await cacheUsage();
+  for(const dir of renderCacheDirectories())await rm(dir,{recursive:true,force:true,maxRetries:5,retryDelay:200}).catch(error=>log(error));
+  await sweepVideoJobFolders(videoJobsDirectory(),activeJobIds()).catch(error=>log(error));
+  // Separated vocals are in use while a lyric analysis or a video job runs.
+  if(!before.analysisRunning){await rm(vocalCache().root,{recursive:true,force:true,maxRetries:5,retryDelay:200}).catch(error=>log(error));await store.mutate(data=>{for(const row of data.tracks)delete row.vocalCacheKeys;});}
+  const after=await cacheUsage();notify();
+  return {freed:Math.max(0,before.render+before.work+before.vocal-after.render-after.work-after.vocal),vocalKept:before.analysisRunning,...after};
+}
 /**
  * Permanent deletion of songs leaves nothing behind: besides the song files and job folders removed
- * by purgeTrash, the separated-vocal cache and every video render-cache entry made from the songs go
- * too (cache entries from before receipts named their songs cannot be attributed and are removed).
+ * by purgeTrash, the separated vocals made from the songs go too.
  */
 async function purgeTracksCompletely(ids){
   const selected=new Set(Array.isArray(ids)?ids:[]),candidates=store.data.tracks.filter(row=>row.trashedAt&&row.kind!=='stem'&&selected.has(row.id));
@@ -102,12 +134,11 @@ async function purgeTracksCompletely(ids){
   const result=await updateTrash(purgeTrash,ids);
   const deleted=new Set(result.deletedIds||[]),survivors=new Set(store.data.tracks.flatMap(row=>row.vocalCacheKeys||[]));
   await removeVocalCache(vocalCache().root,[...vocalKeys].filter(([id])=>deleted.has(id)).flatMap(([,keys])=>keys).filter(key=>!survivors.has(key))).catch(error=>log(error));
-  await removeRenderCache(renderCacheDirectory(),{trackIds:[...deleted],unattributed:true}).catch(error=>log(error));
   notify();return result;
 }
 /**
- * Deletes a finished video: always its list entry, its job records and work folders and its render
- * cache; the video file too when the user chose it.
+ * Deletes a finished video: always its list entry, its job records and work folders; the video file
+ * too when the user chose it — moved to the system trash, so a mistake can be undone there.
  */
 async function deleteVideo(p){
   const row=findById(store.data.videos,p?.id,'영상');
@@ -116,11 +147,10 @@ async function deleteVideo(p){
   if(p.removeFile){
     let info=null;try{info=await stat(row.videoPath);}catch(error){if(error.code!=='ENOENT')throw error;}
     if(info&&!info.isFile())throw new Error('영상 경로가 일반 파일이 아니어서 삭제하지 않았습니다.');
-    if(info)await rm(row.videoPath,{force:true});
+    if(info){try{await shell.trashItem(row.videoPath);}catch(error){throw new Error('영상 파일을 휴지통으로 옮기지 못했습니다: '+error.message);}}
   }
   const jobs=store.data.jobs.filter(job=>job.type==='video'&&(job.result?.videoId===row.id||(job.request?.outputPath&&job.request.outputPath===row.videoPath)));
   for(const job of jobs)await rm(path.join(app.getPath('userData'),'video-jobs',job.id),{recursive:true,force:true}).catch(error=>log(error));
-  await removeRenderCache(renderCacheDirectory(),{cacheKeys:row.cacheKey?[row.cacheKey]:[],unattributed:!row.cacheKey}).catch(error=>log(error));
   const removing=new Set(jobs.map(job=>job.id));
   await store.mutate(data=>{data.videos=data.videos.filter(item=>item.id!==row.id);data.jobs=data.jobs.filter(job=>!removing.has(job.id));});
   notify();return {deleted:true,fileRemoved:p.removeFile};
@@ -143,10 +173,10 @@ function originKind(row,depth=0){
 }
 const media=(id,type='audio')=>`boks-media://track/${id}/${type}`;
 const policySettings=()=>({...store.data.settings,installedModelIds:Object.keys(installs).filter(id=>installs[id]?.status==='installed')});
-const options=()=>installationOptions(system,policySettings()).map(x=>{const active=path.basename(store.data.settings.backbonePath||'')===x.backbone;let status=installs[x.id]?.status||x.status;if(status==='installed'&&active&&!engines.every(e=>e.available))status='repair-needed';return {...x,active,status};});
+const options=()=>installationOptions(system,policySettings()).map(x=>{const active=path.basename(store.data.settings.backbonePath||'')===x.backbone;let status=installs[x.id]?.status||x.status;if(status==='installed'&&active&&engines.some(e=>e.status==='not-installed'))status='repair-needed';return {...x,active,status};});
 const visibleTrack=t=>({...t,...(()=>{const timing=lyricTimingState(t);return timing.state?{lyricState:timing.state,lyricReview:timing.review}:{};})(),...(t.kind==='stem'?{stemName:stemLabel(t.audioPath),stemMode:t.metadata?.stemMode||'two'}:{}),...(t.kind==='mastered'&&!t.originKind?{originKind:originKind(t)}:{}),audioUrl:media(t.id),artUrl:t.artPath?media(t.id,'art'):undefined});
 const recommendationState=()=>{const result=installationRecommendation(system,policySettings());return {...result,installed:result.optionId===recommendedInstallation.optionId&&recommendedInstallation.installed};};
-const snapshot=()=>({...store.data,host:{platform:process.platform,arch:process.arch},projects:store.data.projects.filter(row=>!row.deletedAt),presets:[...presets,...store.data.customPresets],videos:store.data.videos.map(row=>({...row,videoUrl:'boks-media://video/'+row.id})),tracks:store.data.tracks.filter(t=>!t.trashedAt).map(visibleTrack),trash:store.data.tracks.filter(t=>t.trashedAt).map(visibleTrack),jobs:store.data.jobs.map(({request,...j})=>({...j,projectId:request?.projectId,...(request?.trackId?{trackId:request.trackId}:{}),...(request?.playlistId?{playlistId:request.playlistId,trackCount:request.trackIds?.length||0}:{})})),system,engines,lyricInstallation,videoInstallation,localImage,installOptions:options(),installedEngines:installedEngineChoices(engines),installationRecommendation:recommendationState(),codexModels,codexError,codexStatus,codexUsage,codexAccess:codexBilling.pending?{state:'checking'}:codexBilling,claudeStatus,claudeUsage:claudeUsageView(),claudeModels,agents:agentState()});
+const snapshot=()=>({...store.data,host:{platform:process.platform,arch:process.arch},projects:store.data.projects.filter(row=>!row.deletedAt),presets:[...presets,...store.data.customPresets],videos:store.data.videos.map(row=>({...row,videoUrl:'boks-media://video/'+row.id})),tracks:store.data.tracks.filter(t=>!t.trashedAt).map(visibleTrack),trash:store.data.tracks.filter(t=>t.trashedAt).map(visibleTrack),jobs:store.data.jobs.map(({request,...j})=>({...j,projectId:request?.projectId,...(request?.trackId?{trackId:request.trackId}:{}),...(request?.playlistId?{playlistId:request.playlistId,trackCount:request.trackIds?.length||0,...(j.type==='video'?{videoOptions:pickVideoOptions(request.options),videoTitle:request.title}:{})}:{})})),system,engines,lyricInstallation,videoInstallation,localImage,installOptions:options(),installedEngines:installedEngineChoices(engines),installationRecommendation:recommendationState(),codexModels,codexError,codexStatus,codexUsage,codexAccess:codexBilling.pending?{state:'checking'}:codexBilling,claudeStatus,claudeUsage:claudeUsageView(),claudeModels,agents:agentState()});
 // Codex counts as usable only after its login has been confirmed as a ChatGPT subscription.
 const codexAgentStatus=()=>codexStatus.state!=='installed'?codexStatus:codexBilling.pending?{...codexStatus,state:'checking'}:{...codexStatus,usable:codexBilling.usable,...(codexBilling.message?{message:codexBilling.message}:{})};
 let localImage={families:[],installed:[],engineInstalled:false,recommendedId:null};
@@ -215,16 +245,63 @@ async function refreshCodex(){
   })();
   try{await codexRefresh;return {codexStatus,codexUsage};}finally{codexRefresh=null;}
 }
+/**
+ * Video templates are GPU canvas scenes encoded with WebCodecs (H.264) inside the app; FFmpeg (part of
+ * the integrated installation) joins the music. Nothing else is installed for videos.
+ */
+async function videoRendererState(){
+  const found=await resolveFfmpeg(),ffmpeg=!!found&&await stat(found).then(info=>info.isFile(),()=>false);
+  return {available:ffmpeg,name:'GPU 캔버스 · WebCodecs',message:ffmpeg?'가사·연주곡 영상 렌더링 · GPU H.264 인코딩':'음악 결합에 필요한 FFmpeg가 없습니다. YuE2 모델 통합 설치에 포함됩니다.'};
+}
+// Engine checks can overlap (a cold Stem check takes minutes): only the latest one's results are kept.
+let engineRefresh=0;
 async function refreshEngines(){
-  engines=await engineStates(store.data.settings,runner);
-  installs=await readInstalls(store.data.settings.modelPath);
-  lyricInstallation=await inspectLyricRuntime({packageRoot:store.data.settings.modelPath});
-  videoInstallation=await inspectVideoRuntime(store.data.settings.modelPath);
-  localImage=await localImageState(store.data.settings.modelPath,system).catch(error=>({...localImage,error:error.message}));
+  const generation=++engineRefresh,settings=store.data.settings;
+  const nextEngines=await engineStates(settings,runner),nextInstalls=await readInstalls(settings.modelPath);
+  const nextLyric=await inspectLyricRuntime({packageRoot:settings.modelPath}),nextVideo=await videoRendererState();
+  const nextImage=await localImageState(settings.modelPath,system).catch(error=>({...localImage,error:error.message}));
   const recommendation=installationRecommendation(system,policySettings());
   const option=installationOptions(system,policySettings()).find(item=>item.id===recommendation.optionId);
-  recommendedInstallation={optionId:recommendation.optionId,installed:lyricInstallation.ready&&videoInstallation.available&&await recommendedBundleInstalled({option,receipt:installs[recommendation.optionId],settings:store.data.settings,runner})};
+  const nextRecommended={optionId:recommendation.optionId,installed:nextLyric.ready&&await recommendedBundleInstalled({option,receipt:nextInstalls[recommendation.optionId],settings,runner})};
+  if(generation!==engineRefresh)return;
+  engines=nextEngines;installs=nextInstalls;lyricInstallation=nextLyric;videoInstallation=nextVideo;localImage=nextImage;recommendedInstallation=nextRecommended;
   notify();
+}
+/** A failed, cancelled, dismissed or pruned job's folder (`<project>/jobs/<job>`) unless a song uses a file in it. */
+async function removeJobFolder(job){
+  const request=job.request||{},owner=store.data.projects.find(item=>item.id===(request.storageProjectId||request.projectId));
+  if(!owner?.directory||!path.isAbsolute(owner.directory)||typeof job.id!=='string'||!/^[\w-]+$/.test(job.id))return;
+  const dir=path.join(owner.directory,'jobs',job.id),inside=file=>typeof file==='string'&&path.resolve(file).toLowerCase().startsWith(path.resolve(dir).toLowerCase()+path.sep);
+  if(store.data.tracks.some(row=>inside(row.audioPath)||inside(row.artPath)))return;
+  await rm(dir,{recursive:true,force:true,maxRetries:5,retryDelay:200});
+}
+/**
+ * 다시 실행: song jobs go through their own action again (its checks: songs in the trash, analyses already
+ * running or nothing left to align, FFmpeg lookup); generation checks its project and engine; a video
+ * keeps its file name only while no other video took it. The old record (and its folder) then goes.
+ */
+async function rerunJob(id){
+  const job=store.data.jobs.find(item=>item.id===id);
+  if(!job||!['interrupted','failed'].includes(job.status))throw new Error('다시 실행할 작업이 없습니다.');
+  const request=job.request||{};let started;
+  if(job.type==='lyricsAlign')started=await actions.alignLyrics({trackId:request.trackId});
+  else if(job.type==='mastering')started=await actions.mastering({trackId:request.trackId,options:request.options});
+  else if(job.type==='stems')started=await actions.stems({trackId:request.trackId,stemMode:request.stemMode});
+  else if(job.type==='albumArt')started=await actions.albumArt({trackId:request.trackId});
+  else if(job.type==='video'){
+    const pending=store.data.jobs.some(item=>item!==job&&item.type==='video'&&['queued','running','needs-confirmation'].includes(item.status)&&item.request?.outputPath===request.outputPath);
+    const taken=pending||store.data.videos.some(video=>path.resolve(video.videoPath).toLowerCase()===path.resolve(request.outputPath||'').toLowerCase()&&Date.parse(video.createdAt)>Date.parse(job.createdAt));
+    if(taken||(!request.overwrite&&await stat(request.outputPath).then(()=>true,()=>false)))throw new Error('그 사이 같은 이름의 영상이 만들어졌습니다. ‘설정 바꿔 만들기’로 이름을 정해 다시 만드세요.');
+    const ffmpegPath=await resolveFfmpeg();if(!ffmpegPath)throw new Error('영상 출력에 필요한 FFmpeg를 찾을 수 없습니다.');
+    started=await queue.rerun(job.id,{ffmpegPath});return {jobId:started.id};
+  }else{
+    if(['generate','cover'].includes(job.type)){project(request.projectId);const engine=engines.find(e=>e.id===(job.type==='cover'?'cover':'music'));if(!engine?.available)throw new Error(engine?.message||'엔진 설치가 필요합니다.');}
+    // Installations run one at a time and only while nothing else runs (as when started from the settings).
+    if(['install','imageInstall'].includes(job.type)&&(queue.processing||store.data.jobs.some(item=>['install','imageInstall'].includes(item.type)&&['queued','running'].includes(item.status))))throw new Error('진행 중인 작업이 끝난 후 설치를 다시 실행하세요.');
+    started=await queue.rerun(job.id);await removeJobFolder(job).catch(error=>log(error));return {jobId:started.id};
+  }
+  await queue.dismiss(job.id);await removeJobFolder(job).catch(error=>log(error));
+  return {jobId:(Array.isArray(started)?started[0]:started)?.id||started?.jobId};
 }
 async function workdir(projectId,jobId){const p=projectRecord(projectId);const dir=path.join(p.directory,'jobs',jobId);await ensureSpace(dir,256*1024*1024);return dir;}
 async function prepareAudio({audioPath,projectId,title,...metadata},{signal}={}){
@@ -304,17 +381,17 @@ async function runJob(job,signal,onProgress){
       },onFailure:async failure=>{failure.title=track(failure.trackId).title;await log(`가사 분석 실패 · ${failure.title}: ${failure.message}`,job.id);}});
       prepared=await videoPreflight(request.trackIds.map(track),request.options.mode);
       if(!prepared.renderReady)return {awaitingConfirmation:true,trackIds:[...new Set([...prepared.needsConfirmation,...prepared.needsAlignment])],alignmentFailures,playlistId:request.playlistId};
-      result=await renderPlaylistVideo({packageRoot:request.settings.modelPath,tracks:prepared.tracks,options:request.options,outputPath:request.outputPath,overwrite:request.overwrite===true,ffmpegPath:request.ffmpegPath,backgroundPath:request.backgroundPath,workDir:path.join(app.getPath('userData'),'video-jobs',job.id)},{signal,onProgress,log:message=>log(message,job.id)});
-      signal.throwIfAborted();row={id:id(),playlistId:request.playlistId,title:request.title,createdAt:new Date().toISOString(),...result};
-      // An overwritten file replaces the earlier video's entry, its job records and its render cache.
+      result=await renderPlaylistVideo({tracks:prepared.tracks,options:request.options,outputPath:request.outputPath,overwrite:request.overwrite===true,ffmpegPath:request.ffmpegPath,backgroundPath:request.backgroundPath,workDir:path.join(app.getPath('userData'),'video-jobs',job.id)},{signal,onProgress,log:message=>log(message,job.id)});
+      // The file is written: from here the job finishes even if a cancel arrives late.
+      row={id:id(),playlistId:request.playlistId,title:request.title,createdAt:new Date().toISOString(),...result};
+      // An overwritten file replaces the earlier video's entry and its job records.
       const replaced=request.overwrite?store.data.videos.filter(item=>path.resolve(item.videoPath).toLowerCase()===path.resolve(result.videoPath).toLowerCase()):[];
       const replacedJobs=new Set(store.data.jobs.filter(item=>item.type==='video'&&item.id!==job.id&&replaced.some(video=>item.result?.videoId===video.id)).map(item=>item.id));
       await store.mutate(d=>{d.videos=d.videos.filter(item=>!replaced.includes(item));d.jobs=d.jobs.filter(item=>!replacedJobs.has(item.id));d.videos.push(row);});
-      for(const video of replaced)if(video.cacheKey&&video.cacheKey!==result.cacheKey)await removeRenderCache(renderCacheDirectory(),{cacheKeys:[video.cacheKey]}).catch(error=>log(error,job.id));
-      signal.throwIfAborted();notify();return {videoId:row.id};
+      notify();return {videoId:row.id,committed:true};
     }catch(error){
       if(row){store.data.videos=store.data.videos.filter(item=>item.id!==row.id);try{await store.save();}catch(rollbackError){await log(rollbackError,job.id);throw error;}}
-      if(result?.videoPath===request.outputPath)await rm(result.videoPath,{force:true}).catch(cleanup=>log(cleanup,job.id));
+      if(result?.videoPath===request.outputPath&&!request.overwrite)await rm(result.videoPath,{force:true}).catch(cleanup=>log(cleanup,job.id));
       throw error;
     }finally{
       // Lyric analysis and render work for this job is no longer needed once it ends (done, paused, failed or cancelled).
@@ -327,9 +404,8 @@ async function runJob(job,signal,onProgress){
     const existing=await recommendedBundleInstalled({option,receipt,settings:request.settings,runner});
     const result=existing?receipt.result:await installRuntime({option,settings:request.settings,engineDirectory:path.dirname(runner),signal,onProgress,log:message=>log(message,job.id)});
     await ensureLyricRuntime({packageRoot:request.settings.modelPath,engineDirectory:path.dirname(runner)},{signal,onProgress,log:message=>log(message,job.id)});
-    await ensureVideoRuntime(request.settings.modelPath,{signal,onProgress,log:message=>log(message,job.id)});
     await store.mutate(d=>{for(const key of ['runtimePlatform','runtimeArch','musicBackend','nativeBackend','nativeExecutable','audioCppModelRoot','backbonePath','vaePath','transcriberPath','stemPython','stemDevice','stemModel','ffmpegPath','engineSelection'])if(result[key])d.settings[key]=result[key];d.settings.installedModelId=request.optionId;});
-    await refreshEngines();return result;
+    clearEngineProbes();await refreshEngines();return result;
   }
   if(request.operation==='imageInstall'){
     const result=await installImageVariant({root:store.data.settings.modelPath,system,variantId:request.variantId,signal,onProgress,log:message=>log(message,job.id)});
@@ -436,11 +512,9 @@ async function localArt(t,settings,{dir,signal,onProgress,jobId}){
 async function pickAudio(){const r=await dialog.showOpenDialog(window,{title:'음악 파일 선택',properties:['openFile'],filters:[{name:'Audio',extensions:['wav','flac','mp3','m4a','ogg']} ]});return r.canceled?null:r.filePaths[0];}
 async function copyManaged(source,directory){const s=await stat(source);await ensureSpace(directory,s.size);const dest=path.join(directory,id()+path.extname(source).toLowerCase());await copyFile(source,dest);return dest;}
 async function saveSettings(payload){
-  if(queue.processing)throw new Error('진행 중인 작업이 끝난 후 설정을 변경하세요.');
   const next={...store.data.settings,...validateCodexSettings(store.data.settings,payload,codexModels),...validateClaudeSettings(store.data.settings,payload)};
   if(next.agentProvider!==store.data.settings.agentProvider){
     const agents=await settledAgents();
-    if(queue.processing)throw new Error('진행 중인 작업이 끝난 후 설정을 변경하세요.');
     if(!agentProviders.includes(next.agentProvider))throw new Error('AI 에이전트는 Claude 또는 Codex 중에서 선택하세요.');
     if(!agents.available[next.agentProvider])throw new Error(agentUnavailable(next.agentProvider));
     next.agentChoiceConfirmed=true;
@@ -452,12 +526,13 @@ async function saveSettings(payload){
   if(payload.defaultCount!==undefined){const n=Number(payload.defaultCount);if(!Number.isInteger(n)||n<1||n>4)throw new Error('생성 개수는 1~4개입니다.');next.defaultCount=n;}
   if(payload.engineSelection){for(const [role,id] of Object.entries(payload.engineSelection)){const match=installedEngineChoices(engines).find(e=>e.role===role&&e.id===id);if(!match)throw new Error('등록되지 않은 엔진입니다.');if(id!==next.engineSelection?.[role]&&!match.available)throw new Error(match.reason);}next.engineSelection={...next.engineSelection,...payload.engineSelection};}
   for(const key of ['projectPath','modelPath']){if(!path.isAbsolute(next[key]))throw new Error('저장 위치는 절대 경로로 입력하세요.');await ensureSpace(next[key],0);}
-  await store.mutate(d=>{d.settings=next;});await refreshEngines();return next;
+  // Running jobs use the settings copied when they were queued; engine locations and choices wait for them.
+  if(queue.processing&&(next.modelPath!==store.data.settings.modelPath||JSON.stringify(next.engineSelection||{})!==JSON.stringify(store.data.settings.engineSelection||{})))throw new Error('진행 중인 작업이 끝난 후 모델 저장 위치나 사용할 엔진을 바꾸세요. 다른 설정은 지금 저장할 수 있습니다.');
+  await store.mutate(d=>{d.settings=next;});void refreshEngines().catch(error=>log(error));return next;
 }
 const playlistAction=(action,payload)=>withLibraryLock('목록 처리 중입니다. 잠시 후 다시 시도하세요.',()=>action(store,payload));
 const actions={
   getVideoTemplates:async()=>readVideoTemplates(),
-  openVideoTemplatesFolder:async()=>{const error=await shell.openPath(videoTemplateDirectory);if(error)throw Error(error);return {opened:true};},
   getVideoPreflight:async p=>{const list=findById(store.data.playlists,p.playlistId,'재생목록');const rows=list.trackIds.map(id=>store.data.tracks.find(t=>t.id===id&&!t.trashedAt&&t.kind!=='stem')).filter(Boolean);const result=await videoPreflight(rows,p.mode);return {...result,tracks:result.tracks.map(({audioPath,artPath,...row})=>row)};},
   revealVideo:async p=>{const row=findById(store.data.videos,p.id,'영상');try{if(!(await stat(row.videoPath)).isFile())throw Error();}catch{throw new Error('영상 파일을 찾을 수 없습니다. 이동하거나 삭제했을 수 있습니다.');}shell.showItemInFolder(row.videoPath);return {revealed:true};},
   videoDestination:async()=>{const result=await dialog.showOpenDialog(window,{title:'영상 저장 폴더 선택',...(store.data.settings.videoDirectory?{defaultPath:store.data.settings.videoDirectory}:{}),properties:['openDirectory','createDirectory']});if(result.canceled||!result.filePaths?.[0])return {cancelled:true};const directory=await realpath(result.filePaths[0]);if(!(await stat(directory)).isDirectory())throw Error('폴더를 선택하세요.');videoDirectories.add(directory);return {directory};},
@@ -471,7 +546,7 @@ const actions={
     if(typeof p.directory!=='string'||!(videoDirectories.has(p.directory)||savedFolder)||await realpath(p.directory).catch(()=>'')!==p.directory)throw Error('영상 저장 폴더를 선택 창에서 다시 선택하세요.');
     if(p.backgroundPath&&![...videoBackgrounds.values()].includes(p.backgroundPath))throw Error('배경 사진을 선택 창에서 선택하세요.');
     const backgroundPath=getVideoTemplate(opts.template).requiresBackground?p.backgroundPath:undefined;
-    const rows=list.trackIds.map(id=>store.data.tracks.find(t=>t.id===id&&!t.trashedAt&&t.kind!=='stem')).filter(Boolean),prepared=await videoPreflight(rows,opts.mode);if(!prepared.ready)throw Error('가사와 가사 시간을 먼저 검토하세요.');
+    const rows=list.trackIds.map(id=>store.data.tracks.find(t=>t.id===id&&!t.trashedAt&&t.kind!=='stem')).filter(Boolean);if(!rows.length)throw Error('플레이리스트에 영상으로 만들 음악이 없습니다.');if(rows.length>500)throw Error('한 영상에는 500곡까지 넣을 수 있습니다.');const prepared=await videoPreflight(rows,opts.mode);if(!prepared.ready)throw Error('가사와 가사 시간을 먼저 검토하세요.');
     const ffmpegPath=await resolveFfmpeg();
     if(!ffmpegPath)throw Error('영상 출력에 필요한 FFmpeg를 찾을 수 없습니다.');
     const safe=title.replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_').replace(/[. ]+$/,'').slice(0,100)||'playlist';
@@ -486,7 +561,7 @@ const actions={
       if(p.conflict==='overwrite'){if(reserved.has(fileKey(outputPath)))throw Error('같은 이름으로 만들고 있는 영상이 있습니다. 그 작업이 끝난 뒤 덮어쓰거나 다른 이름을 쓰세요.');overwrite=true;}
       else{let n=1;while(await taken(named(n)))n++;if(p.conflict!=='number')return {conflict:true,name:path.basename(outputPath),suggested:path.basename(named(n))};outputPath=named(n);}
     }
-    if(opts.brand!==store.data.settings.videoBrand||p.directory!==store.data.settings.videoDirectory)await store.mutate(data=>{data.settings.videoBrand=opts.brand;data.settings.videoDirectory=p.directory;});
+    await store.mutate(data=>{data.settings.videoBrand=opts.brand;data.settings.videoDirectory=p.directory;data.settings.videoOptions=pickVideoOptions(opts);});
     const [job]=await queue.add([{operation:'video',playlistId:list.id,trackIds:rows.map(t=>t.id),title,options:opts,directory:p.directory,outputPath,...(overwrite?{overwrite:true}:{}),backgroundPath,ffmpegPath,settings:{...store.data.settings}}]);return {jobId:job.id,fileName:path.basename(outputPath)};
   },
   resumeVideo:async p=>{
@@ -541,6 +616,36 @@ const actions={
     try{await store.mutate(()=>{t.lyricTiming={...old,lyricsHash:normalized.lyricsHash,cues,duration,automation:{...old?.automation,version:2,timingMode:'line-starts',needsConfirmation:[]},reviewedAt:new Date().toISOString()};for(const job of waiting){job.status='completed';job.stage='가사 시간 저장 완료';job.result={...job.result,awaitingConfirmation:false};}});}catch(error){t.lyricTiming=old;waiting.forEach((job,index)=>Object.assign(job,previousJobs[index]));throw error;}notify();return t.lyricTiming;
   },
   // '나중에' on the banner: the analysis stops asking; its open lines stay on the song (LRC 확인 badge).
+  rerunJob:async p=>rerunJob(p?.id),
+  dismissJob:async p=>{const job=store.data.jobs.find(item=>item.id===p?.id);await queue.dismiss(p?.id);if(job&&job.type!=='video')await removeJobFolder(job).catch(error=>log(error));},
+  cacheUsage:()=>cacheUsage(),
+  clearCaches:()=>withLibraryLock('다른 정리 작업이 진행 중입니다. 잠시 후 다시 시도하세요.',()=>clearCaches()),
+  saveVideoPresets:async p=>{
+    if(!Array.isArray(p?.presets)||p.presets.length>30)throw new Error('영상 설정 프리셋은 30개까지 저장할 수 있습니다.');
+    const presets=p.presets.map(item=>{const name=requiredString(item?.name,'프리셋 이름',40);validateVideoOptions(item.options);return {name,options:pickVideoOptions(item.options)};});
+    if(new Set(presets.map(item=>item.name)).size!==presets.length)throw new Error('같은 이름의 프리셋이 있습니다.');
+    await store.mutate(data=>{data.settings.videoPresets=presets;});notify();return presets;
+  },
+  exportLyricTiming:async p=>{
+    const t=track(p?.trackId),text=lyricSubtitles(t);
+    const result=await dialog.showSaveDialog(window,{title:'LRC 내보내기',defaultPath:fileSafe(t.title)+'.lrc',filters:[{name:'LRC',extensions:['lrc']}]});
+    if(result.canceled||!result.filePath)return null;await writeFile(result.filePath,'\ufeff'+text,'utf8');return {fileName:path.basename(result.filePath)};
+  },
+  exportVideoSubtitles:async p=>{
+    const row=findById(store.data.videos,p?.id,'영상');
+    if(row.options?.mode!=='vocal')throw new Error('가사 영상만 자막을 내보낼 수 있습니다.');
+    if(!Array.isArray(row.chapters))throw new Error('이 영상에는 곡 위치 정보가 없습니다. 이번 버전부터 만든 영상의 자막을 내보낼 수 있습니다.');
+    const {text,count,missing}=videoSubtitles({chapters:row.chapters,tracks:new Map(store.data.tracks.map(item=>[item.id,item]))});
+    const result=await dialog.showSaveDialog(window,{title:'자막(SRT) 내보내기',defaultPath:fileSafe(row.title)+'.srt',filters:[{name:'SRT',extensions:['srt']}]});
+    if(result.canceled||!result.filePath)return null;await writeFile(result.filePath,'\ufeff'+text,'utf8');return {fileName:path.basename(result.filePath),count,missing};
+  },
+  saveThumbnail:async p=>{
+    const match=/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(typeof p?.dataUrl==='string'?p.dataUrl:'');
+    const bytes=match&&Buffer.from(match[1],'base64');
+    if(!bytes||bytes.length>20*1024*1024||bytes.subarray(0,8).toString('hex')!=='89504e470d0a1a0a')throw new Error('썸네일 이미지를 만들지 못했습니다.');
+    const result=await dialog.showSaveDialog(window,{title:'썸네일 저장',defaultPath:path.join(store.data.settings.videoDirectory||app.getPath('pictures'),fileSafe(p.name)+'.png'),filters:[{name:'PNG',extensions:['png']}]});
+    if(result.canceled||!result.filePath)return null;await writeFile(result.filePath,bytes);return {fileName:path.basename(result.filePath)};
+  },
   dismissLyricConfirmation:async p=>{
     const job=findById(store.data.jobs,p?.jobId,'가사 분석');
     if(job.type!=='lyricsAlign'||job.status!=='needs-confirmation')return;
@@ -581,6 +686,7 @@ const actions={
   deletePlaylist:p=>playlistAction(deletePlaylist,p),
   addToPlaylist:p=>playlistAction(addToPlaylist,p),
   removeFromPlaylist:p=>playlistAction(removeFromPlaylist,p),
+  reorderPlaylist:async p=>{const row=await playlistAction(reorderPlaylist,p);notify();return row;},
   bootstrap:async()=>snapshot(),
   trackWaveform:async p=>{const row=track(p.id);return audioWaveform(row.audioPath,{ffmpegPath:store.data.settings.ffmpegPath,cacheDirectory:path.join(app.getPath('userData'),'waveform-cache')});},
   stemWaveform:async p=>{const row=track(p.id);if(row.kind!=='stem')throw new Error('Stem 음원을 선택하세요.');return stemWaveform(row.audioPath);},
@@ -588,10 +694,10 @@ const actions={
   copyText:async p=>{if(typeof p.text!=='string'||p.text.length>200000)throw new Error('복사할 텍스트가 올바르지 않습니다.');clipboard.writeText(p.text);return true;},
   createProject:async p=>{const name=requiredString(p.name,'프로젝트 이름',100);const projectId=id();const directory=path.join(store.data.settings.projectPath,projectId);await ensureSpace(directory,0);const item={id:projectId,name,directory,createdAt:new Date().toISOString(),draft:{}};await store.mutate(d=>d.projects.push(item));notify();return item;},
   renameProject:async p=>{const item=project(p.id);await store.mutate(()=>{item.name=requiredString(p.name,'프로젝트 이름',100);});notify();},
-  deleteProject:async p=>{if(queue?.processing)throw new Error('진행 중인 작업을 완료하거나 취소한 뒤 프로젝트를 삭제하세요.');return withLibraryLock('휴지통 처리 중입니다. 잠시 후 다시 시도하세요.',()=>deleteProject(store,p.id));},
+  deleteProject:async p=>{return withLibraryLock('휴지통 처리 중입니다. 잠시 후 다시 시도하세요.',()=>deleteProject(store,p.id));},
   saveDraft:async p=>{const item=project(p.projectId);if(!p.draft||JSON.stringify(p.draft).length>100000)throw new Error('초안 데이터가 너무 큽니다.');await store.mutate(()=>{item.draft=Object.fromEntries(Object.entries(p.draft).filter(([key])=>['title','lyrics','style','presetId','instrumental','instrumentalDuration','count','parentId'].includes(key)));});},
   saveSettings,
-  refreshSystem:async()=>{system=await inspectSystem(store.data.settings.modelPath);await refreshEngines();return snapshot();},
+  refreshSystem:async()=>{system=await inspectSystem(store.data.settings.modelPath);clearEngineProbes();await refreshEngines();return snapshot();},
   refreshCodex:async()=>{const [result]=await Promise.all([refreshCodex(),refreshCodexBilling()]);return result;},
   refreshModels:async()=>{await Promise.all([refreshCodex(),refreshCodexBilling()]);return codexModels;},
   generate:async p=>{
@@ -628,7 +734,7 @@ const actions={
     if(youtubeFinishing.has(origin.id)||store.data.jobs.some(job=>job.request?.extractionJobId===origin.id&&['queued','running'].includes(job.status)))throw new Error('저장 중인 음악은 취소 후 정리하세요.');
     await youtubeImporter.discard(origin.result.sessionId);await store.mutate(()=>{origin.result.discarded=true;});notify();return true;
   },
-  moveTracks:async p=>{if(queue.processing)throw new Error('진행 중인 작업이 완료된 후 이동하세요.');return withLibraryLock('진행 중인 작업이 완료된 후 이동하세요.',()=>moveTracks(store,p.ids,p.projectId));},
+  moveTracks:async p=>{return withLibraryLock('진행 중인 작업이 완료된 후 이동하세요.',()=>moveTracks(store,p.ids,p.projectId));},
   trashTracks:async p=>updateTrash(moveToTrash,p.ids),
   cancelJob:async p=>queue.cancel(p.id),
   discardLyricsResult:async p=>{
@@ -717,7 +823,7 @@ const actions={
     if(store.data.jobs.some(job=>job.type==='imageInstall'&&['queued','running'].includes(job.status)))throw new Error('이미지 모델을 설치하고 있습니다. 끝난 뒤 다시 시도하세요.');
     const [job]=await queue.add([{operation:'imageInstall',variantId:row.id,title:`앨범아트 모델 설치 · ${row.familyName} ${row.quant}`,settings:{...store.data.settings}}]);return {jobId:job.id};
   },
-  installModel:async p=>{system=await inspectSystem(store.data.settings.modelPath);const option=installationOptions(system,policySettings()).find(x=>x.id===p.id);if(!option)throw new Error('알 수 없는 설치 옵션입니다.');if(!option.supported)throw new Error(option.reason);if(queue.processing)throw new Error('진행 중인 작업이 끝난 후 모델을 변경하세요.');const receipt=installs[p.id];if(receipt?.status==='installed'&&receipt.result){const ready=await recommendedBundleInstalled({option,receipt,settings:store.data.settings,runner});if(ready&&(await inspectLyricRuntime({packageRoot:store.data.settings.modelPath})).ready&&(await inspectVideoRuntime(store.data.settings.modelPath)).available){await store.mutate(d=>{Object.assign(d.settings,receipt.result);d.settings.installedModelId=p.id;d.settings.modelPath=enginePackages;});await refreshEngines();return {activated:true};}}if(store.data.jobs.some(j=>['running','queued'].includes(j.status)&&j.type==='install'))throw new Error('모델 설치가 이미 대기 중이거나 진행 중입니다.');return queue.add([{operation:'install',optionId:p.id,title:option.name+' 설치',settings:{...store.data.settings}}]);}
+  installModel:async p=>{system=await inspectSystem(store.data.settings.modelPath);const option=installationOptions(system,policySettings()).find(x=>x.id===p.id);if(!option)throw new Error('알 수 없는 설치 옵션입니다.');if(!option.supported)throw new Error(option.reason);if(queue.processing)throw new Error('진행 중인 작업이 끝난 후 모델을 변경하세요.');const receipt=installs[p.id];if(receipt?.status==='installed'&&receipt.result){const ready=await recommendedBundleInstalled({option,receipt,settings:store.data.settings,runner});if(ready&&(await inspectLyricRuntime({packageRoot:store.data.settings.modelPath})).ready){await store.mutate(d=>{Object.assign(d.settings,receipt.result);d.settings.installedModelId=p.id;d.settings.modelPath=enginePackages;});await refreshEngines();return {activated:true};}}if(store.data.jobs.some(j=>['running','queued'].includes(j.status)&&j.type==='install'))throw new Error('모델 설치가 이미 대기 중이거나 진행 중입니다.');return queue.add([{operation:'install',optionId:p.id,title:option.name+' 설치',settings:{...store.data.settings}}]);}
 };
 function trusted(event){return !!window&&!window.isDestroyed()&&event.sender===window.webContents&&event.senderFrame===window.webContents.mainFrame;}
 
@@ -783,10 +889,13 @@ try{
   await youtubeImporter.cleanupExpired();
   // Work folders of video jobs from earlier runs (nothing runs yet at startup).
   await sweepVideoJobFolders(path.join(app.getPath('userData'),'video-jobs')).catch(error=>log(error));
+  for(const job of store.prunedJobs||[])await removeJobFolder(job).catch(error=>log(error));
+  // Videos keep no render cache: caches and the HyperFrames runtime left by earlier versions go.
+  for(const dir of renderCacheDirectories())await rm(dir,{recursive:true,force:true,maxRetries:5,retryDelay:200}).catch(error=>log(error));
   // Agent work runs through a CLI and never touches the GPU, so it gets its own serial lane:
   // a lyric request no longer waits behind a music generation (measured 110 s wait in the e2e).
   // Local album art uses the GPU: it waits in the engine lane with music, stems and installs.
-  queue=new JobQueue({store,run:runJob,notify,log,lane:job=>AGENT_JOB_TYPES.has(job.type)&&!(job.type==='albumArt'&&job.request?.settings?.imageEngine==='local')?'agent':'engine'});
+  queue=new JobQueue({store,run:runJob,notify,progress:sendProgress,finished:job=>job.type==='video'?undefined:removeJobFolder(job),log,lane:job=>AGENT_JOB_TYPES.has(job.type)&&!(job.type==='albumArt'&&job.request?.settings?.imageEngine==='local')?'agent':'engine'});
   protocol.handle('boks-media',async request=>{try{const u=new URL(request.url);if(u.hostname==='video'){const row=findById(store.data.videos,u.pathname.slice(1),'영상');return await mediaResponse(row.videoPath,request);}if(u.hostname==='video-background'){const file=videoBackgrounds.get(u.pathname.slice(1));if(!file)return new Response('Not found',{status:404});return await mediaResponse(file,request);}if(u.hostname!=='track')return new Response('Not found',{status:404});const [trackId,type]=u.pathname.slice(1).split('/');const t=findById(store.data.tracks,trackId,'곡');const file=type==='art'?t.artPath:t.audioPath;if(!file)return new Response('Not found',{status:404});return await mediaResponse(file,request);}catch{return new Response('Not found',{status:404});}});
   ipcMain.handle('boks:invoke',async(event,method,payload)=>{try{if(!trusted(event)||!Object.hasOwn(actions,method))throw new Error('허용되지 않은 요청입니다.');if(trashBusy&&method!=='bootstrap')throw new Error('휴지통 처리 중입니다. 잠시 후 다시 시도하세요.');return {ok:true,data:await actions[method](payload||{})};}catch(e){await log(e);return {ok:false,error:e.code==='ENOSPC'?'저장 공간이 부족합니다.':e.code==='ENOENT'?'파일을 찾을 수 없습니다. 저장 위치와 설치 상태를 확인하세요.':e.message||'작업에 실패했습니다. 상세 로그를 확인하세요.'};}});
   ipcMain.on('boks:window',(event,action)=>{if(!trusted(event))return;if(action==='minimize')window.minimize();if(action==='maximize')window.isMaximized()?window.unmaximize():window.maximize();if(action==='close')window.close();});

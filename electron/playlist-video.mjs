@@ -5,7 +5,7 @@ export function validateVideoOptions(input={}){
  if(input.codec!==undefined&&input.codec!=='h264')throw Error('현재 영상 코덱은 H.264를 지원합니다.');
  // 시네마 플로우 · GPU merged into 시네마 플로우 when every built-in template became a GPU scene.
  const legacy={'cinematic-gpu':'cinematic'};
- const options={aspect:input.aspect??'16:9',resolution:input.resolution??1080,fps:input.fps??30,format:input.format??'mp4',template:legacy[input.template]??input.template??'albumblur',spectrum:input.spectrum??'bars',color:input.color??'mono',mode:input.mode??'instrumental',repeat:input.repeat??1};
+ const options={aspect:input.aspect??'16:9',resolution:input.resolution??1080,fps:input.fps??30,format:input.format??'mp4',template:legacy[input.template]??input.template??'albumblur',spectrum:input.spectrum??'bars',color:input.color??'mono',mode:input.mode??'instrumental',repeat:input.repeat??1,normalize:input.normalize===true};
  const template=getVideoTemplate(options.template);
  // Scene text: the editable top-left brand line and the playlist video title (control characters removed).
  const line=(value,label,max)=>{if(value===undefined)return undefined;if(typeof value!=='string')throw Error(label+' 형식이 올바르지 않습니다.');const clean=value.replace(/[\x00-\x1f\x7f]/g,' ').replace(/\s+/g,' ').trim();if(clean.length>max)throw Error(`${label}은(는) ${max}자 이내로 입력하세요.`);return clean;};
@@ -18,4 +18,4 @@ export function validateVideoOptions(input={}){
  return {...options,width:options.aspect==='16:9'?long:short,height:options.aspect==='16:9'?short:long};
 }
 export {analyzeAudioFrame} from './audio-frame.mjs';
-export {renderPlaylistVideo,probeVideoEncoder} from './hyperframes-render.mjs';
+export {renderPlaylistVideo,videoChapters} from './video-render.mjs';

@@ -1,6 +1,6 @@
 import {modelChoices} from './model-catalog.mjs';
 import {macModelChoices} from './macos-model-catalog.mjs';
-const lyricItems=[{label:'가사 시간 정렬',value:'Qwen3 ForcedAligner 0.6B'},{label:'교차 확인 인식',value:'Qwen3-ASR 1.7B'},{label:'영상 제작',value:'HyperFrames'}];
+const lyricItems=[{label:'가사 시간 정렬',value:'Qwen3 ForcedAligner 0.6B'},{label:'교차 확인 인식',value:'Qwen3-ASR 1.7B'},{label:'영상 제작',value:'GPU 캔버스 · WebCodecs H.264'}];
 
 // All choices remain visible/selectable. Only installation is gated with a reason.
 // These conservative bundle thresholds are app policy, not measured guarantees.
