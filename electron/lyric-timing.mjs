@@ -31,6 +31,8 @@ export function lyricTimingState(track) {
   if (track?.kind === 'stem' || !timing?.cues?.length || typeof lyrics !== 'string' || timing.lyricsHash !== hashLyrics(lyrics)) return {state: null, review: 0};
   const lines = lyricLines(lyrics);
   if (timing.cues.length !== lines.length) return {state: null, review: 0};
+  // Timing without a single start (e.g. lyrics the analysis cannot place yet) is no timing for the badge.
+  if (!timing.cues.some(cue => Number.isFinite(cue.start))) return {state: null, review: 0};
   const review = timing.cues.filter(cue => !['manual', 'automatic'].includes(cue.status) || !Number.isFinite(cue.start)).length;
   return {state: review ? 'review' : 'ready', review};
 }

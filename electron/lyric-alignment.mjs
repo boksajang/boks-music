@@ -31,7 +31,9 @@ const lyricModels=LYRIC_ENGINES;
 // The models accept more languages, but a language is added here only after a real-song audit.
 // `engineNames` are the language names each engine API expects.
 export const LYRIC_LANGUAGES=Object.freeze([
-  {code:'ko',name:'Korean',label:'한국어',script:/\p{Script=Hangul}/u,engineNames:{asr:'Korean',aligner:'Korean'}}
+  {code:'ko',name:'Korean',label:'한국어',script:/\p{Script=Hangul}/u,engineNames:{asr:'Korean',aligner:'Korean'}},
+  // Lyrics with no Hangul and Latin letters (2026-10-25: English is supported by default; mixed lyrics stay Korean).
+  {code:'en',name:'English',label:'영어',script:/\p{Script=Latin}/u,engineNames:{asr:'English',aligner:'English'}}
 ]);
 // Whole-file decode memory and runtime grow linearly; every model call works on bounded
 // windows (<=32 s recognition chunks, line-local alignment). Real-song audit covered 392 s;
