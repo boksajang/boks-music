@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "rockstage",
+  "name": "록 콘서트 무대",
+  "description": "연기 속 무빙 라이트가 곡마다 새 조명 큐로 교차하며 훑고, 무대 뒤 LED 화면이 다음 곡 목록으로 넘어갑니다 (경음악 전용)",
+  "order": 24,
+  "renderer": "canvas",
+  "scene": "rockstage",
+  "maxResolution": 2160,
+  "modes": [
+    "instrumental"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "round-bars",
+    "mirror",
+    "blocks",
+    "dots",
+    "wave",
+    "double-wave"
+  ],
+  "recommendedSpectrum": "bars"
+}

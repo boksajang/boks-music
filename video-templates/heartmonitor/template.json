@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "heartmonitor",
+  "name": "하트 모니터",
+  "description": "장밋빛 심전도 선이 화면을 쓸며 박동과 하트를 그리고 스캔 빔이 가사를 새기며, 곡 사이에는 평선 뒤 심장이 다시 뜁니다",
+  "order": 31,
+  "renderer": "canvas",
+  "scene": "heartmonitor",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal",
+    "instrumental"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "round-bars",
+    "mirror",
+    "wave",
+    "double-wave"
+  ],
+  "recommendedSpectrum": "bars"
+}

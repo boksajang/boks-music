@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "graffiti",
+  "name": "그래피티 월",
+  "description": "콘크리트 벽에 스텐실로 곡 제목을 찍고, 가사가 스프레이로 그려지며 페인트가 흘러내리다 다음 줄 전에 롤러가 지나가며 덮습니다",
+  "order": 26,
+  "renderer": "canvas",
+  "scene": "graffiti",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "round-bars",
+    "blocks",
+    "mirror",
+    "dots"
+  ],
+  "recommendedSpectrum": "bars"
+}

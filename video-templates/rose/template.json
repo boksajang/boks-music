@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "rose",
+  "name": "장미 개화",
+  "description": "가사가 한 줄씩 넘어갈 때마다 장미가 바깥 꽃잎부터 피어나 마지막 줄에 만개하고, 꽃잎 위 이슬이 음악에 반짝입니다",
+  "order": 32,
+  "renderer": "canvas",
+  "scene": "rose",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "round-bars",
+    "mirror",
+    "wave",
+    "double-wave"
+  ],
+  "recommendedSpectrum": "wave"
+}

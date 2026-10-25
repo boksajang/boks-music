@@ -54,7 +54,7 @@ npm start
 | 가사 시간 정렬 | Qwen3-ASR-1.7B · Qwen3-ForcedAligner-0.6B + 가사 기반 onset 추정 | 동일 |
 | 앨범아트(로컬) | [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) (CUDA / Vulkan / CPU) + Z-Image Turbo · FLUX.2 klein 4B GGUF | stable-diffusion.cpp (Metal) |
 | 앨범아트(에이전트) | Codex CLI 이미지 도구 | 동일 |
-| 가사 영상 렌더링 | 템플릿 21종: Canvas 장면(GPU) + WebCodecs 하드웨어 H.264(최대 4K), 별도 설치 없음 · 음악 결합: FFmpeg | 동일 |
+| 가사 영상 렌더링 | 템플릿 37종: Canvas 장면(GPU) + WebCodecs 하드웨어 H.264(최대 4K), 별도 설치 없음 · 음악 결합: FFmpeg | 동일 |
 | YouTube 가져오기 | yt-dlp + FFmpeg | 동일 |
 | AI 작사 · 앨범아트 설명문 | Claude Code CLI / Codex CLI | 동일 |
 
@@ -67,6 +67,6 @@ AI 에이전트는 로컬 CLI의 구독 로그인으로만 실행하며 유료 A
 | `electron/` | 메인 프로세스: 작업 대기열, 엔진 설치·실행, 에이전트 연동, 가사 정렬·영상 제작, 저장소 |
 | `src/` | 렌더러(React + TypeScript): 화면과 컴포넌트, 스타일 |
 | `engines/` | Python 엔진 스크립트(Stem 분리, 가사 정렬)와 모델 카탈로그 |
-| `video-templates/` | 가사 영상 템플릿(HTML/CSS). 추가 방법은 [video-templates/README.md](video-templates/README.md) |
+| `video-templates/` | 가사·경음악 영상 템플릿 37종의 정보 파일(GPU 장면). 목록은 [video-templates/README.md](video-templates/README.md) |
 | `assets/` | 앱 아이콘 |
 | `scripts/` | 개발 실행(`dev.mjs`), 아이콘 생성(`icons.mjs`) |

@@ -17,3 +17,19 @@ export function lyricLines(lyrics) {
     .map((text, index) => ({lineId: `line-${index + 1}`, text}));
   return lines;
 }
+
+/** For each sung line (same order as lyricLines), the index of the lyrics text line it comes from. */
+export function lyricLineRows(lyrics) {
+  const rows = [];
+  lyrics.split(/\r\n|\n|\r/).forEach((row, index) => { if (lyricLines(row).length) rows.push(index); });
+  return rows;
+}
+
+/** Lyrics with one sung line replaced by `text` (or removed when text is null); other lines are untouched. */
+export function editLyricLine(lyrics, index, text) {
+  const rows = lyricLineRows(lyrics), row = rows[index];
+  if (row === undefined) throw new Error('수정할 가사 줄을 찾지 못했습니다.');
+  const newline = /\r\n/.test(lyrics) ? '\r\n' : '\n', source = lyrics.split(/\r\n|\n|\r/);
+  if (text === null) source.splice(row, 1); else source[row] = String(text).replace(/[\r\n]+/g, ' ').trim();
+  return source.join(newline);
+}

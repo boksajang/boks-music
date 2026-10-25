@@ -7,10 +7,10 @@ import {removeVocalCache,sweepVideoJobFolders,folderSize} from './cleanup.mjs';
 import {lyricSubtitles,videoSubtitles} from './subtitles.mjs';
 import {alignTrackLyrics,ensureLyricRuntime,inspectLyricRuntime,lyricAlignmentSupport} from './lyric-alignment.mjs';
 import {analyzeLyricBatch} from './lyric-batch.mjs';
-import {normalizeLyrics,hashLyrics,validateLyricStarts,preserveManualStarts,lyricTimingState} from './lyric-timing.mjs';
+import {normalizeLyrics,hashLyrics,validateLyricStarts,mergeLyricProgress,remapLyricTiming,preserveManualStarts,lyricTimingState} from './lyric-timing.mjs';
 import {LYRIC_FILE_LIMITS,parseLyricTimingFile,planLyricTimingImport} from './lyric-file.mjs';
 import {localImageState,installImageVariant,generateLocalImage} from './image-engine.mjs';
-import {lyricLines} from './lyric-lines.mjs';
+import {lyricLines,editLyricLine} from './lyric-lines.mjs';
 import {masterAudio,validateMasteringOptions} from './mastering.mjs';
 import {commitImportedTrack} from './import-commit.mjs';
 import {moveTracks} from './track-move.mjs';
@@ -174,13 +174,23 @@ function originKind(row,depth=0){
 const media=(id,type='audio')=>`boks-media://track/${id}/${type}`;
 const policySettings=()=>({...store.data.settings,installedModelIds:Object.keys(installs).filter(id=>installs[id]?.status==='installed')});
 const options=()=>installationOptions(system,policySettings()).map(x=>{const active=path.basename(store.data.settings.backbonePath||'')===x.backbone;let status=installs[x.id]?.status||x.status;if(status==='installed'&&active&&engines.some(e=>e.status==='not-installed'))status='repair-needed';return {...x,active,status};});
+// Timing of the current lyrics carried over to new lyrics (timing that belonged to older lyrics is dropped).
+function timingAfterLyrics(t,lyrics,options){const current=t.lyricTiming?.cues?.length&&t.lyricTiming.lyricsHash===hashLyrics(t.lyrics||'')?t.lyricTiming:null;return {current,...(current?remapLyricTiming(current,lyrics,options):{timing:undefined,kept:0,changed:0,added:0,removed:0})};}
 const visibleTrack=t=>({...t,...(()=>{const timing=lyricTimingState(t);return timing.state?{lyricState:timing.state,lyricReview:timing.review}:{};})(),...(t.kind==='stem'?{stemName:stemLabel(t.audioPath),stemMode:t.metadata?.stemMode||'two'}:{}),...(t.kind==='mastered'&&!t.originKind?{originKind:originKind(t)}:{}),audioUrl:media(t.id),artUrl:t.artPath?media(t.id,'art'):undefined});
 const recommendationState=()=>{const result=installationRecommendation(system,policySettings());return {...result,installed:result.optionId===recommendedInstallation.optionId&&recommendedInstallation.installed};};
 const snapshot=()=>({...store.data,host:{platform:process.platform,arch:process.arch},projects:store.data.projects.filter(row=>!row.deletedAt),presets:[...presets,...store.data.customPresets],videos:store.data.videos.map(row=>({...row,videoUrl:'boks-media://video/'+row.id})),tracks:store.data.tracks.filter(t=>!t.trashedAt).map(visibleTrack),trash:store.data.tracks.filter(t=>t.trashedAt).map(visibleTrack),jobs:store.data.jobs.map(({request,...j})=>({...j,projectId:request?.projectId,...(request?.trackId?{trackId:request.trackId}:{}),...(request?.playlistId?{playlistId:request.playlistId,trackCount:request.trackIds?.length||0,...(j.type==='video'?{videoOptions:pickVideoOptions(request.options),videoTitle:request.title}:{})}:{})})),system,engines,lyricInstallation,videoInstallation,localImage,installOptions:options(),installedEngines:installedEngineChoices(engines),installationRecommendation:recommendationState(),codexModels,codexError,codexStatus,codexUsage,codexAccess:codexBilling.pending?{state:'checking'}:codexBilling,claudeStatus,claudeUsage:claudeUsageView(),claudeModels,agents:agentState()});
 // Codex counts as usable only after its login has been confirmed as a ChatGPT subscription.
 const codexAgentStatus=()=>codexStatus.state!=='installed'?codexStatus:codexBilling.pending?{...codexStatus,state:'checking'}:{...codexStatus,usable:codexBilling.usable,...(codexBilling.message?{message:codexBilling.message}:{})};
-let localImage={families:[],installed:[],engineInstalled:false,recommendedId:null};
-const agentState=()=>resolveAgents({settings:store.data.settings,codexStatus:codexAgentStatus(),claudeStatus,localImage:{ready:localImage.installed.includes(store.data.settings.localImageModel)}});
+let localImage={families:[],installed:[],engineInstalled:false,recommendedId:null,checked:false};
+// Local image models are files on disk: they are checked on their own (in well under a second) so album art
+// settings and the agent state never wait for the engine checks, whose Stem runtime check can take minutes.
+let imageRefresh=0;
+async function refreshLocalImage(){
+  const generation=++imageRefresh,next=await localImageState(store.data.settings.modelPath,system).then(state=>({...state,checked:true}),error=>({...localImage,checked:true,error:error.message}));
+  if(generation===imageRefresh){localImage=next;notify();}
+  return localImage;
+}
+const agentState=()=>resolveAgents({settings:store.data.settings,codexStatus:codexAgentStatus(),claudeStatus,localImage:{ready:localImage.installed.includes(store.data.settings.localImageModel),checking:!localImage.checked}});
 const agentUnavailable=id=>{const status=id==='claude'?claudeStatus:codexAgentStatus();return status.state==='installed'&&status.usable===false?status.message:`${id==='claude'?'Claude Code':'Codex'}가 설치되어 있지 않아 선택할 수 없습니다.`;};
 const claudeUsageView=()=>{
   if(claudeStatus.usable===false)return {state:'unavailable',message:claudeStatus.message};
@@ -257,14 +267,14 @@ async function videoRendererState(){
 let engineRefresh=0;
 async function refreshEngines(){
   const generation=++engineRefresh,settings=store.data.settings;
+  void refreshLocalImage();
   const nextEngines=await engineStates(settings,runner),nextInstalls=await readInstalls(settings.modelPath);
   const nextLyric=await inspectLyricRuntime({packageRoot:settings.modelPath}),nextVideo=await videoRendererState();
-  const nextImage=await localImageState(settings.modelPath,system).catch(error=>({...localImage,error:error.message}));
   const recommendation=installationRecommendation(system,policySettings());
   const option=installationOptions(system,policySettings()).find(item=>item.id===recommendation.optionId);
   const nextRecommended={optionId:recommendation.optionId,installed:nextLyric.ready&&await recommendedBundleInstalled({option,receipt:nextInstalls[recommendation.optionId],settings,runner})};
   if(generation!==engineRefresh)return;
-  engines=nextEngines;installs=nextInstalls;lyricInstallation=nextLyric;videoInstallation=nextVideo;localImage=nextImage;recommendedInstallation=nextRecommended;
+  engines=nextEngines;installs=nextInstalls;lyricInstallation=nextLyric;videoInstallation=nextVideo;recommendedInstallation=nextRecommended;
   notify();
 }
 /** A failed, cancelled, dismissed or pruned job's folder (`<project>/jobs/<job>`) unless a song uses a file in it. */
@@ -522,7 +532,7 @@ async function saveSettings(payload){
   if(typeof payload.projectPath==='string')next.projectPath=payload.projectPath.trim();
   if(typeof payload.autoAlbumArt==='boolean')next.autoAlbumArt=payload.autoAlbumArt;
   if(payload.imageEngine!==undefined){if(!['agent','local'].includes(payload.imageEngine))throw new Error('이미지 생성 엔진은 로컬 모델 또는 에이전트 중에서 선택하세요.');next.imageEngine=payload.imageEngine;}
-  if(payload.localImageModel!==undefined&&payload.localImageModel!==store.data.settings.localImageModel){if(!localImage.installed.includes(payload.localImageModel))throw new Error('설치된 로컬 이미지 모델만 선택할 수 있습니다.');next.localImageModel=payload.localImageModel;}
+  if(payload.localImageModel!==undefined&&payload.localImageModel!==store.data.settings.localImageModel){if(!localImage.checked||!localImage.installed.includes(payload.localImageModel))await refreshLocalImage();if(!localImage.installed.includes(payload.localImageModel))throw new Error('설치된 로컬 이미지 모델만 선택할 수 있습니다.');next.localImageModel=payload.localImageModel;}
   if(payload.defaultCount!==undefined){const n=Number(payload.defaultCount);if(!Number.isInteger(n)||n<1||n>4)throw new Error('생성 개수는 1~4개입니다.');next.defaultCount=n;}
   if(payload.engineSelection){for(const [role,id] of Object.entries(payload.engineSelection)){const match=installedEngineChoices(engines).find(e=>e.role===role&&e.id===id);if(!match)throw new Error('등록되지 않은 엔진입니다.');if(id!==next.engineSelection?.[role]&&!match.available)throw new Error(match.reason);}next.engineSelection={...next.engineSelection,...payload.engineSelection};}
   for(const key of ['projectPath','modelPath']){if(!path.isAbsolute(next[key]))throw new Error('저장 위치는 절대 경로로 입력하세요.');await ensureSpace(next[key],0);}
@@ -581,12 +591,26 @@ const actions={
       const job=await queue.resume(previous.id,{...previous.request,options,settings:{...store.data.settings}});return {jobId:job.id};
     }finally{resumingVideos.delete(previous.id);}
   },
+  // What saving new lyrics does to the song's lyric timing, for the notice before saving.
+  previewLyricsChange:async p=>{const t=track(p?.id);if(typeof p?.lyrics!=='string'||p.lyrics===(t.lyrics||''))return {hasTiming:false};const result=timingAfterLyrics(t,p.lyrics);return {hasTiming:!!result.current,kept:result.kept,changed:result.changed,added:result.added,removed:result.removed};},
+  // One sung line corrected or removed from the timing editor; the other lines keep their timing.
+  editLyricLine:async p=>{
+    const t=track(p?.id);if(typeof p.expectedLyrics!=='string'||p.expectedLyrics!==(t.lyrics||''))throw new Error('가사가 변경되었습니다. 시간 검토 창을 다시 열어 주세요.');
+    if(store.data.jobs.some(j=>['queued','running'].includes(j.status)&&(j.request?.trackId===t.id||j.request?.trackIds?.includes(t.id))))throw new Error('이 곡의 작업이 끝난 후 가사를 수정하세요.');
+    if(!Number.isInteger(p.index)||(p.text!==null&&(typeof p.text!=='string'||!p.text.trim()||p.text.length>300)))throw new Error('가사 줄은 300자 이내로 입력하세요.');
+    const lyrics=editLyricLine(t.lyrics||'',p.index,p.text);if(!normalizeLyrics(lyrics).lines.length)throw new Error('마지막 남은 가사 줄은 지울 수 없습니다.');
+    const timing=timingAfterLyrics(t,lyrics,{editedStatus:'keep'}),previous={lyrics:t.lyrics,lyricTiming:t.lyricTiming};
+    try{await store.mutate(()=>{t.lyrics=lyrics;if(timing.timing)t.lyricTiming=timing.timing;else delete t.lyricTiming;});}catch(error){Object.assign(t,previous);throw error;}
+    notify();return {lyrics,lyricTiming:t.lyricTiming||null};
+  },
   updateTrackText:async p=>{
     const t=track(p.id),title=requiredString(p.title,'곡 제목',180);
     if(typeof p.lyrics!=='string'||p.lyrics.length>10000)throw new Error('가사는 10,000자 이내로 입력하세요.');
     if(store.data.jobs.some(j=>['queued','running'].includes(j.status)&&(j.request?.trackId===t.id||j.request?.trackIds?.includes(t.id))))throw new Error('이 곡의 작업이 끝난 후 제목과 가사를 수정하세요.');
     const previous={title:t.title,lyrics:t.lyrics,lyricTiming:t.lyricTiming};
-    try{await store.mutate(()=>{if(t.lyrics!==p.lyrics)delete t.lyricTiming;t.title=title;t.lyrics=p.lyrics;});}catch(error){Object.assign(t,previous);throw error;}
+    // Edited lyrics keep the timing of unchanged lines (changed lines are checked again); see remapLyricTiming.
+    const timing=t.lyrics!==p.lyrics?timingAfterLyrics(t,p.lyrics):null;
+    try{await store.mutate(()=>{if(timing){if(timing.timing)t.lyricTiming=timing.timing;else delete t.lyricTiming;}t.title=title;t.lyrics=p.lyrics;});}catch(error){Object.assign(t,previous);throw error;}
     notify();return visibleTrack(t);
   },
   alignLyrics:async p=>{
@@ -601,6 +625,18 @@ const actions={
     const superseded=store.data.jobs.filter(j=>j.type==='lyricsAlign'&&j.status==='needs-confirmation'&&j.request?.trackId===t.id);
     if(superseded.length)await store.mutate(()=>{for(const j of superseded){j.status='completed';j.stage='새 분석으로 대체됨';j.result={...j.result,awaitingConfirmation:false};}});
     const [job]=await queue.add([{operation:'lyricsAlign',trackId:t.id,projectId:t.projectId,...(t.storageProjectId?{storageProjectId:t.storageProjectId}:{}),title:t.title+' · 가사 시간 분석',settings:{...store.data.settings}}]);return {jobId:job.id};
+  },
+  // Confirmed starts are kept as soon as they are confirmed; the review (and a waiting video) finishes only
+  // with saveLyricTiming once every line is confirmed.
+  saveLyricProgress:async p=>{
+    const t=track(p.id),normalized=normalizeLyrics(t.lyrics||'');
+    if(typeof p.expectedLyrics!=='string'||p.expectedLyrics!==(t.lyrics||''))throw Error('가사가 변경되었습니다. 시간 검토 창을 다시 열어 주세요.');
+    if(store.data.jobs.some(j=>j.type==='video'&&j.request?.trackIds?.includes(t.id)&&['queued','running'].includes(j.status)))throw Error('영상 제작이 끝난 후 가사 시간을 수정하세요.');
+    if(store.data.jobs.some(j=>j.type==='lyricsAlign'&&j.request?.trackId===t.id&&['queued','running'].includes(j.status)))throw new Error('분석이 끝난 후 시간을 저장하세요.');
+    const old=t.lyricTiming;if(!old?.cues?.length||old.lyricsHash!==normalized.lyricsHash)throw new Error('이 가사의 시간 분석이 없습니다. 자동으로 다시 맞추기를 먼저 실행하세요.');
+    const merged=mergeLyricProgress({lines:normalized.lines,cues:p.cues,duration:old.duration,previousCues:old.cues});
+    await store.mutate(()=>{t.lyricTiming={...old,cues:merged.cues,automation:{...old.automation,needsConfirmation:merged.needsConfirmation},reviewedAt:new Date().toISOString()};});
+    notify();return {open:merged.needsConfirmation.length};
   },
   saveLyricTiming:async p=>{
     const t=track(p.id),normalized=normalizeLyrics(t.lyrics||'');

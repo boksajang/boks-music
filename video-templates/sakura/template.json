@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "sakura",
+  "name": "벚꽃 길",
+  "description": "벚꽃잎이 돌풍에 휘날리고 가사 글자가 꽃잎처럼 내려앉으며, 곡이 바뀌면 꽃잎 바람이 화면을 쓸고 지나갑니다",
+  "order": 33,
+  "renderer": "canvas",
+  "scene": "sakura",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal",
+    "instrumental"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "round-bars",
+    "mirror",
+    "wave",
+    "double-wave"
+  ],
+  "recommendedSpectrum": "round-bars"
+}

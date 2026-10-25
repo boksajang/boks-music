@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "forge",
+  "name": "용광로 각인",
+  "description": "가사가 그을린 철판에 찍히는 순간 하얗게 달아올라 불티를 튀기고 주황·진홍으로 식으며, 철판이 한 줄씩 밀려 올라갑니다",
+  "order": 22,
+  "renderer": "canvas",
+  "scene": "forge",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "round-bars",
+    "mirror",
+    "wave",
+    "double-wave"
+  ],
+  "recommendedSpectrum": "bars"
+}

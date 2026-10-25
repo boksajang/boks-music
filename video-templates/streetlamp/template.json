@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "streetlamp",
+  "name": "눈 내리는 가로등",
+  "description": "홀로 선 가로등 불빛 속에서만 눈송이와 가사가 빛나고, 지난 줄은 눈 쌓인 바닥으로 가라앉아 눈에 덮입니다",
+  "order": 35,
+  "renderer": "canvas",
+  "scene": "streetlamp",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal",
+    "instrumental"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "round-bars",
+    "mirror",
+    "wave",
+    "double-wave"
+  ],
+  "recommendedSpectrum": "bars"
+}

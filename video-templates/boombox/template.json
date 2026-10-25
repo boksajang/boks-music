@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "boombox",
+  "name": "붐박스",
+  "description": "붐박스 스피커가 비트에 튀어나오고 형광 표시창에 곡 제목이 흐르며, 곡이 바뀌면 버튼이 눌리고 셋리스트에 줄이 그어집니다 (경음악 전용)",
+  "order": 29,
+  "renderer": "canvas",
+  "scene": "boombox",
+  "maxResolution": 2160,
+  "modes": [
+    "instrumental"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "blocks",
+    "mirror",
+    "dots",
+    "wave"
+  ],
+  "recommendedSpectrum": "bars"
+}

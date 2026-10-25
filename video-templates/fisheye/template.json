@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "fisheye",
+  "name": "골드 어안",
+  "description": "사진을 금빛 어안 렌즈로 휘어 천천히 다가가고 렌즈 반사가 미끄러지며, 가사는 초점이 당겨지듯 또렷해지고 아래 가운데에 가는 파형이 흐릅니다",
+  "order": 27,
+  "renderer": "canvas",
+  "scene": "fisheye",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal",
+    "instrumental"
+  ],
+  "requiresBackground": true,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "wave",
+    "double-wave",
+    "ribbon",
+    "mirror",
+    "bars"
+  ],
+  "recommendedSpectrum": "wave"
+}

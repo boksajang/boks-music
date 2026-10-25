@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "nightdrive",
+  "name": "나이트 드라이브",
+  "description": "빛줄기가 뒤로 흐르는 야간 도로를 달리다 곡마다 터널을 지나 색이 바뀌고, 트랙 번호가 굴러가며 서브우퍼가 저음에 울립니다 (경음악 전용)",
+  "order": 28,
+  "renderer": "canvas",
+  "scene": "nightdrive",
+  "maxResolution": 2160,
+  "modes": [
+    "instrumental"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "round-bars",
+    "blocks",
+    "mirror",
+    "wave"
+  ],
+  "recommendedSpectrum": "bars"
+}

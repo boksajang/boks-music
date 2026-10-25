@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "typewriter",
+  "name": "타자기",
+  "description": "활자가 한 글자씩 종이에 찍히며 캐리지가 옆으로 밀리고, 줄 끝에서 캐리지가 돌아가 종이가 한 줄 올라갑니다",
+  "order": 36,
+  "renderer": "canvas",
+  "scene": "typewriter",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "round-bars",
+    "mirror",
+    "wave",
+    "double-wave"
+  ],
+  "recommendedSpectrum": "bars"
+}

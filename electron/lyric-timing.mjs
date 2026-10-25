@@ -135,6 +135,84 @@ export function automaticDisplayEnds(cues,duration){
     return {...cue,end};
   });
 }
+/**
+ * Lyric timing after the lyrics are edited, instead of dropping it: lines whose text is unchanged keep their
+ * starts and statuses (matched in order by longest common subsequence); where the same number of lines sits
+ * between two kept lines on both sides, those lines are edits of each other and keep their start, as a line to
+ * check again (editedStatus 'review') or as they were ('keep', a line corrected in the timing editor); other new
+ * lines have no start yet; removed lines go. Returns counts for the notice, and timing undefined when nothing of
+ * the old timing is left.
+ */
+export function remapLyricTiming(timing, lyrics, {editedStatus = 'review'} = {}) {
+  const old = timing?.cues || [], lines = lyricLines(lyrics);
+  if (!old.length) return {timing: undefined, kept: 0, changed: 0, added: lines.length, removed: 0};
+  const key = text => String(text || '').replace(/\s+/g, '');
+  const n = old.length, m = lines.length, table = Array.from({length: n + 1}, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) table[i][j] = key(old[i].text) === key(lines[j].text) ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1]);
+  const pairs = [];
+  for (let i = 0, j = 0; i < n && j < m;) {
+    if (key(old[i].text) === key(lines[j].text)) { pairs.push([i, j]); i++; j++; }
+    else if (table[i + 1][j] >= table[i][j + 1]) i++; else j++;
+  }
+  const from = new Array(m).fill(-1), edited = new Set();
+  for (const [i, j] of pairs) from[j] = i;
+  const anchors = [[-1, -1], ...pairs, [n, m]];
+  // Between two kept lines: the same number of lines on both sides are edits of each other in order; otherwise
+  // a new line takes the start of the old line it resembles most (in order), like a line edited and another added.
+  const grams = text => { const value = key(text); return value.length < 2 ? [value] : Array.from({length: value.length - 1}, (_, k) => value.slice(k, k + 2)); };
+  const alike = (a, b) => { const p = key(a), q = key(b); if (Math.min(p.length, q.length) >= 2 && (p.includes(q) || q.includes(p))) return .9; const x = grams(a), y = grams(b), pool = [...y]; let shared = 0; for (const gram of x) { const at = pool.indexOf(gram); if (at >= 0) { shared++; pool.splice(at, 1); } } return 2 * shared / (x.length + y.length); };
+  for (let k = 0; k + 1 < anchors.length; k++) {
+    const [i0, j0] = anchors[k], [i1, j1] = anchors[k + 1];
+    if (i1 - i0 === j1 - j0) { for (let d = 1; i0 + d < i1; d++) { from[j0 + d] = i0 + d; edited.add(j0 + d); } continue; }
+    for (let i = i0 + 1, j = j0 + 1; i < i1 && j < j1;) {
+      let best = -1, score = .5;
+      for (let c = j; c < j1; c++) { const value = alike(old[i].text, lines[c].text); if (value > score) { score = value; best = c; } }
+      if (best < 0) { i++; continue; }
+      from[best] = i; edited.add(best); i++; j = best + 1;
+    }
+  }
+  let kept = 0, changed = 0, added = 0;
+  const cues = lines.map((line, j) => {
+    const i = from[j];
+    if (i < 0) { added++; return {lineId: line.lineId, text: line.text, start: null, end: null, status: 'unmatched', reasons: ['lyrics_changed']}; }
+    const cue = old[i];
+    if (!edited.has(j)) { kept++; return {...cue, lineId: line.lineId, text: line.text}; }
+    changed++;
+    if (editedStatus === 'keep') return {...cue, lineId: line.lineId, text: line.text};
+    return {...cue, lineId: line.lineId, text: line.text, status: Number.isFinite(cue.start) ? 'review' : 'unmatched', reasons: ['lyrics_changed']};
+  });
+  const removed = n - kept - changed;
+  if (!kept && !changed) return {timing: undefined, kept, changed, added, removed};
+  return {timing: {...timing, lyricsHash: hashLyrics(lyrics), cues: automaticDisplayEnds(cues, timing.duration), automation: {...timing.automation, needsConfirmation: cues.filter(cue => !['automatic', 'manual'].includes(cue.status)).map(cue => cue.lineId)}}, kept, changed, added, removed};
+}
+
+/**
+ * Saves confirmations made so far without finishing the review: lines still to check keep their status, so
+ * leaving the editor never loses confirmed starts. A confirmed (manual) start must lie inside the song and
+ * between the starts of the lines around it; an 'automatic' line keeps that status only with its analysed start.
+ */
+export function mergeLyricProgress({lines,cues,duration,previousCues=[]}){
+  checkLines(lines);checkDuration(duration);
+  if(!Array.isArray(cues)||cues.length!==lines.length)throw new Error('모든 가사 줄의 시작점을 확인하세요.');
+  const rows=lines.map((line,index)=>{
+    const cue=cues[index];
+    if(!cue||cue.lineId!==line.lineId)throw new Error('가사 줄의 순서가 일치하지 않습니다.');
+    if(!['manual','automatic','review','unmatched'].includes(cue.status))throw new Error(`${index+1}행의 상태가 올바르지 않습니다.`);
+    const start=cue.start===null||cue.start===undefined?null:Number(cue.start);
+    if(start!==null&&(!Number.isFinite(start)||start<0||start>=duration))throw new Error(`${index+1}행의 시작점을 곡 안에서 맞춰 주세요.`);
+    const before=previousCues.find(row=>row.lineId===line.lineId);
+    const status=cue.status==='automatic'&&!(before?.status==='automatic'&&before.start===start)?'manual':cue.status;
+    return {...before,...line,start,status:start===null&&status==='manual'?'review':status};
+  });
+  rows.forEach((row,index)=>{
+    if(row.status!=='manual')return;
+    const previous=rows.slice(0,index).reverse().find(item=>Number.isFinite(item.start)),next=rows.slice(index+1).find(item=>Number.isFinite(item.start));
+    if((previous&&row.start<=previous.start)||(next&&row.start>=next.start))throw new Error(`${index+1}행의 시작점은 앞뒤 가사의 시작점 사이에 있어야 합니다.`);
+    row.reasons=[];
+  });
+  return {cues:automaticDisplayEnds(rows,duration),needsConfirmation:rows.filter(row=>!['automatic','manual'].includes(row.status)).map(row=>row.lineId)};
+}
+
 export function validateLyricStarts({lines,cues,duration,previousCues}){
   checkLines(lines);checkDuration(duration);
   if(!Array.isArray(cues)||cues.length!==lines.length)throw new Error('모든 가사 줄의 시작점을 확인하세요.');

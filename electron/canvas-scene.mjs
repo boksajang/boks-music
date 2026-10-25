@@ -21,12 +21,28 @@ import karaoke from './canvas-scenes/karaoke.mjs';
 import swiss from './canvas-scenes/swiss.mjs';
 import coverflow from './canvas-scenes/coverflow.mjs';
 import subway from './canvas-scenes/subway.mjs';
+import forge from './canvas-scenes/forge.mjs';
+import bloodmoon from './canvas-scenes/bloodmoon.mjs';
+import rockstage from './canvas-scenes/rockstage.mjs';
+import vhs from './canvas-scenes/vhs.mjs';
+import graffiti from './canvas-scenes/graffiti.mjs';
+import fisheye from './canvas-scenes/fisheye.mjs';
+import nightdrive from './canvas-scenes/nightdrive.mjs';
+import boombox from './canvas-scenes/boombox.mjs';
+import loveletter from './canvas-scenes/loveletter.mjs';
+import heartmonitor from './canvas-scenes/heartmonitor.mjs';
+import rose from './canvas-scenes/rose.mjs';
+import sakura from './canvas-scenes/sakura.mjs';
+import silentfilm from './canvas-scenes/silentfilm.mjs';
+import streetlamp from './canvas-scenes/streetlamp.mjs';
+import typewriter from './canvas-scenes/typewriter.mjs';
+import inkbleed from './canvas-scenes/inkbleed.mjs';
 
 /**
  * GPU canvas scenes. A scene draws one frame for a given time on a 2D canvas, so the same code drives
  * the editor preview and the WebCodecs renderer (no screenshots).
  */
-const SCENES={albumblur,photo,vinyl,paper,cinematic,spectrum,tracklist,cassette,crt,radio,vumeter,polaroid,rainwindow,water,phone,neon,kinetic,karaoke,swiss,coverflow,subway};
+const SCENES={albumblur,photo,vinyl,paper,cinematic,spectrum,tracklist,cassette,crt,radio,vumeter,polaroid,rainwindow,water,phone,neon,kinetic,karaoke,swiss,coverflow,subway,forge,bloodmoon,rockstage,vhs,graffiti,fisheye,nightdrive,boombox,loveletter,heartmonitor,rose,sakura,silentfilm,streetlamp,typewriter,inkbleed};
 export const CANVAS_SCENES=Object.freeze(Object.keys(SCENES));
 /** Scene modules, for the render cache identity. */
 export const CANVAS_SCENE_FILES=Object.freeze(['./canvas-kit.mjs','./audio-frame.mjs',...CANVAS_SCENES.map(id=>`./canvas-scenes/${id}.mjs`)]);

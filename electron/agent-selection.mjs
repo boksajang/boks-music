@@ -19,7 +19,7 @@ export function resolveAgents({settings={},codexStatus,claudeStatus,localImage}=
   const imageEngine=settings.imageEngine==='local'?'local':'agent';
   const local=imageEngine==='local'&&{
     imageAgent:active&&localImage?.ready?active:'',
-    imageReason:!localImage?.ready?'선택한 로컬 이미지 모델이 설치되어 있지 않습니다. 환경설정의 앨범아트 이미지에서 모델을 설치하세요.':active?'':blockedMessage||'앨범아트 설명문을 쓸 AI 에이전트(Claude Code 또는 Codex)가 필요합니다.',
+    imageReason:localImage?.checking?'로컬 이미지 모델을 확인하고 있습니다. 잠시 후 다시 시도하세요.':!localImage?.ready?'선택한 로컬 이미지 모델이 설치되어 있지 않습니다. 환경설정의 앨범아트 이미지에서 모델을 설치하세요.':active?'':blockedMessage||'앨범아트 설명문을 쓸 AI 에이전트(Claude Code 또는 Codex)가 필요합니다.',
   };
   return {
     installed,available,checking,active,imageEngine,

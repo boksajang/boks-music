@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "bloodmoon",
+  "name": "블러드 문",
+  "description": "붉은 개기일식의 코로나가 천천히 돌고 달 둘레의 빛살이 음악에 뻗으며, 가사는 칼날에 베이듯 나타났다 갈라져 흩어집니다",
+  "order": 23,
+  "renderer": "canvas",
+  "scene": "bloodmoon",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal",
+    "instrumental"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "radial-bars",
+    "ring",
+    "double-ring",
+    "radial-dots"
+  ],
+  "recommendedSpectrum": "radial-bars"
+}

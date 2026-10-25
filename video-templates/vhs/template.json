@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "vhs",
+  "name": "VHS 캠코더",
+  "description": "캠코더 뷰파인더에 REC가 깜빡이고 테이프 카운터가 흐르며, 줄이 바뀔 때 트래킹 노이즈가 화면을 찢고 자막이 RGB로 갈라집니다",
+  "order": 25,
+  "renderer": "canvas",
+  "scene": "vhs",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "round-bars",
+    "mirror",
+    "wave",
+    "double-wave"
+  ],
+  "recommendedSpectrum": "bars"
+}

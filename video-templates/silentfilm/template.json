@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "silentfilm",
+  "name": "무성영화",
+  "description": "깜빡이는 흑백 필름에 긁힘과 먼지가 스치고, 필름이 한 칸 미끄러지며 아르데코 자막 카드로 가사가 넘어갑니다",
+  "order": 34,
+  "renderer": "canvas",
+  "scene": "silentfilm",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "round-bars",
+    "mirror",
+    "wave",
+    "double-wave"
+  ],
+  "recommendedSpectrum": "bars"
+}

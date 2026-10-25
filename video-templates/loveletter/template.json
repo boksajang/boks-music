@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "loveletter",
+  "name": "러브 레터",
+  "description": "촛불이 일렁이는 책상에서 만년필이 가사를 한 줄씩 써 내려가고, 곡이 끝나면 편지가 접혀 봉투에 담기고 하트 밀랍 인장이 찍힙니다",
+  "order": 30,
+  "renderer": "canvas",
+  "scene": "loveletter",
+  "maxResolution": 2160,
+  "modes": [
+    "vocal"
+  ],
+  "requiresBackground": false,
+  "aspects": [
+    "16:9",
+    "9:16"
+  ],
+  "spectra": [
+    "bars",
+    "round-bars",
+    "mirror",
+    "wave",
+    "double-wave"
+  ],
+  "recommendedSpectrum": "bars"
+}
