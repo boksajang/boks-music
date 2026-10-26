@@ -76,3 +76,6 @@ test_*.py
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# App data in development (library, logs, caches, Chromium profile, temp)
+/app-data/

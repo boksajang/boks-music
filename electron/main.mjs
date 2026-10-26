@@ -43,6 +43,7 @@ import {inspectClaudeInstallation,readClaudeUsage,generateLyrics as generateClau
 import {removeBillingCredentials,inspectCodexBilling} from './cli-billing.mjs';
 import {resolveCodexExecutable} from './codex-discovery.mjs';
 import {resolveAgents} from './agent-selection.mjs';
+import {resolveDataRoot,dataPaths,migrateLegacyData,clearTempFolder} from './data-root.mjs';
 
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const enginePackages=path.join(root,'engine-packages');
@@ -51,8 +52,15 @@ const vocalCache=()=>vocalCacheInstance||=createVocalCache({root:path.join(app.g
 // AI agents run only through their CLIs on subscription logins. API keys and cloud-provider
 // switches are removed before any child process starts, so no CLI can fall back to metered billing.
 removeBillingCredentials(process.env);
-if(process.env.BOKS_DATA_DIR)app.setPath('userData',path.resolve(process.env.BOKS_DATA_DIR));
 app.setName('Boks Music');
+// App data (library, logs, video work folders, caches, the Chromium profile and temporary files) lives in the
+// project folder in development (<project>/app-data, data-root.mjs); tests use BOKS_DATA_DIR. The system folder
+// used before is moved there once at startup.
+const legacyDataRoot=path.join(app.getPath('appData'),'Boks Music');
+const dataRoot=resolveDataRoot({packaged:app.isPackaged,projectRoot:root,fallback:legacyDataRoot}),appPaths=dataPaths(dataRoot);
+app.setPath('userData',dataRoot);app.setPath('sessionData',appPaths.chromium);
+// Temporary files of the app and of every child process (engines, ffmpeg, render profiles) stay in the data folder.
+for(const key of ['TEMP','TMP','TMPDIR'])process.env[key]=appPaths.temp;
 app.setAppUserModelId('com.boksajang.boksmusic');
 const ownsInstance=app.requestSingleInstanceLock();
 if(!ownsInstance)app.quit();
@@ -84,7 +92,7 @@ const fileSafe=value=>String(value||'').replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_'
 // Video settings kept between videos and in named presets (the scene text and output are chosen per video).
 const VIDEO_OPTION_KEYS=['mode','template','spectrum','color','aspect','resolution','fps','format','repeat','normalize'];
 const pickVideoOptions=options=>Object.fromEntries(VIDEO_OPTION_KEYS.filter(key=>options?.[key]!==undefined).map(key=>[key,options[key]]));
-const log=async(error,job='app')=>{try{await appendFile(path.join(app.getPath('userData'),'details.log'),`${new Date().toISOString()} [${job}] ${error?.stack||error}\n${error?.cause?.stack||''}\n`);}catch{}};
+const log=async(error,job='app')=>{try{await appendFile(appPaths.log,`${new Date().toISOString()} [${job}] ${error?.stack||error}\n${error?.cause?.stack||''}\n`);}catch{}};
 const track=id=>{const row=findById(store.data.tracks,id,'곡');if(row.trashedAt)throw new Error('휴지통의 곡은 복원한 후 사용할 수 있습니다.');return row;};
 let trashBusy=false;
 // One library-wide lock serializes trash, playlist and move mutations.
@@ -916,6 +924,10 @@ async function createWindow(){
 
 if(ownsInstance)void app.whenReady().then(async()=>{
 try{
+  await mkdir(path.dirname(appPaths.log),{recursive:true});await clearTempFolder(dataRoot);
+  // A development run moves the earlier system data folder into the project once. If that fails the app stops
+  // instead of starting with an empty library (the old folder is never touched).
+  if(!app.isPackaged&&!process.env.BOKS_DATA_DIR){try{await migrateLegacyData({from:legacyDataRoot,to:dataRoot,log:message=>void log(message)});}catch(error){await log(error);dialog.showErrorBox('앱 데이터 이동 실패',`이전 데이터 폴더(${legacyDataRoot})를 프로젝트 폴더(${dataRoot})로 옮기지 못했습니다. 이전 데이터는 그대로 있습니다.\n\n${error.message}`);app.exit(1);return;}}
   store=await new Store(app.getPath('userData')).init();
   // Composer drafts live for this app session; saved songs and job requests remain intact.
   await store.mutate(d=>{d.settings.modelPath=enginePackages;for(const project of d.projects)project.draft={};for(const job of d.jobs)if(job.type==='youtubeExtract'&&job.result?.sessionId&&!job.result.importedTrackId)job.result.expired=true;});

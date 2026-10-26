@@ -32,8 +32,10 @@ npm start
 | `engine-packages/stems/` | BS-RoFormer 분리 모델 |
 | `engine-packages/tools/` | yt-dlp |
 | `engine-packages/downloads/`, `cache/` | 내려받기 임시 파일과 엔진 캐시 |
-| 사용자 데이터 폴더 `Boks Music/` | `library.json`(목록·설정·작업 상태)과 `library.json.bak` |
-| Project 저장 위치(환경설정) | 생성·가져온 음원, Stem, 앨범아트, 영상 |
+| `app-data/` | 앱 데이터: `library.json`(목록·설정·작업 상태)과 백업, `logs/`, 영상 작업 폴더, 보컬·파형 캐시, Chromium 프로필, 임시 파일(`tmp/`) |
+| `app-data/projects/`(기본 Project 저장 위치, 환경설정에서 변경) | 생성·가져온 음원, Stem, 앨범아트 |
+
+개발자 모드는 앱 데이터를 모두 프로젝트 폴더의 `app-data/`에 둡니다(저장소에는 포함되지 않음). 예전처럼 `%APPDATA%\Boks Music`에 데이터가 있으면 첫 실행 때 한 번 `app-data/`로 옮기고 경로를 고쳐 씁니다. 원래 폴더는 그대로 두므로, 확인한 뒤 직접 지우면 됩니다. 영상 파일은 영상 만들기 창에서 고른 폴더에 저장됩니다.
 
 ## 음악 모델 구성
 
