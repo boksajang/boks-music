@@ -66,6 +66,7 @@ test_*.py
 /scripts/*
 !/scripts/dev.mjs
 !/scripts/icons.mjs
+!/scripts/after-pack.cjs
 /evaluate.mjs
 /.ignore
 

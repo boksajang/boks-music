@@ -1,6 +1,6 @@
 {
   "name": "boks-music",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.1",
   "private": true,
   "description": "Project-based local AI music creation",
   "author": "boksajang",
@@ -16,9 +16,7 @@
     "package": "npm run build && npm run icons && electron-builder --win nsis --x64"
   },
   "dependencies": {
-    "music-metadata": "^12.0.0",
-    "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "music-metadata": "^12.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
@@ -28,6 +26,8 @@
     "electron": "44.5.1",
     "electron-builder": "^26.15.3",
     "playwright": "latest",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
     "sharp": "^0.35.5",
     "typescript": "^5.9.3",
     "vite": "8.3.2"
@@ -42,8 +42,13 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "assets/**/*",
-      "package.json"
+      "!electron/**/*.d.mts",
+      "assets/icon.ico",
+      "assets/icon.png",
+      "video-templates/**/*.json",
+      "package.json",
+      "!**/*.map",
+      "!**/*.md"
     ],
     "extraResources": [
       {
@@ -51,12 +56,11 @@
         "to": "engines",
         "filter": [
           "**/*",
-          "!**/__pycache__/**"
+          "!**/__pycache__/**",
+          "!test_*.py",
+          "!native_dll_probe.py",
+          "!*.md"
         ]
-      },
-      {
-        "from": "docs",
-        "to": "docs"
       }
     ],
     "win": {
@@ -70,7 +74,15 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "installerIcon": "assets/icon.ico",
-      "uninstallerIcon": "assets/icon.ico"
-    }
+      "uninstallerIcon": "assets/icon.ico",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "electronLanguages": [
+      "ko",
+      "en-US"
+    ],
+    "compression": "maximum",
+    "afterPack": "scripts/after-pack.cjs",
+    "publish": null
   }
 }

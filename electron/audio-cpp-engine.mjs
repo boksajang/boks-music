@@ -5,9 +5,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {verifyFile,verifiedModelsFile} from './verified-files.mjs';
 import {spawn} from 'node:child_process';
+import {existsSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
 import {inspectNative, inspectNativeWav, instrumentalScore} from './native-engine.mjs';
 
-const catalogUrl=new URL('../engines/macos-catalog.json',import.meta.url);
+const developmentCatalog=fileURLToPath(new URL('../engines/macos-catalog.json',import.meta.url));
+const catalogUrl=existsSync(developmentCatalog)?developmentCatalog:path.join(process.resourcesPath,'engines','macos-catalog.json');
 const aborted=signal=>{if(signal?.aborted)throw Object.assign(new Error('작업이 취소되었습니다.'),{name:'AbortError'});};
 const inside=(root,file)=>{const relative=path.relative(root,file);return relative!==''&&!relative.startsWith('..'+path.sep)&&relative!=='..'&&!path.isAbsolute(relative);};
 export function audioCppGenerateArgs(settings,request,{output,artifacts,abc,planOnly=false,instrumentalAdapter}) {

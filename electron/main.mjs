@@ -47,7 +47,6 @@ import {resolveAgents} from './agent-selection.mjs';
 import {resolveDataRoot,dataPaths,clearTempFolder} from './data-root.mjs';
 
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const enginePackages=path.join(root,'engine-packages');
 let vocalCacheInstance;
 const vocalCache=()=>vocalCacheInstance||=createVocalCache({root:path.join(app.getPath('userData'),'vocal-cache')});
 // AI agents run only through their CLIs on subscription logins. API keys and cloud-provider
@@ -59,6 +58,9 @@ app.setName('Boks Music');
 // keeps Electron's userData.
 // (Asking Electron for its default userData creates that folder, so a development run never asks.)
 const dataRoot=resolveDataRoot({packaged:app.isPackaged,projectRoot:root,fallback:app.isPackaged&&!process.env.BOKS_DATA_DIR?app.getPath('userData'):''}),appPaths=dataPaths(dataRoot);
+// Engines and models: <project>/engine-packages in development; an installed app keeps them in its data folder
+// because its own folder is read-only (app.asar, usually under Program Files).
+const enginePackages=app.isPackaged?path.join(dataRoot,'engine-packages'):path.join(root,'engine-packages');
 app.setPath('userData',dataRoot);app.setPath('sessionData',appPaths.chromium);
 // Temporary files of the app and of every child process (engines, ffmpeg, render profiles) stay in the data folder.
 for(const key of ['TEMP','TMP','TMPDIR'])process.env[key]=appPaths.temp;

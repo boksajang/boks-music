@@ -9,9 +9,11 @@ import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { verifyFile, verifiedModelsFile } from './verified-files.mjs';
 import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
-const catalogPath = fileURLToPath(new URL('../engines/native-catalog.json', import.meta.url));
+const developmentCatalog = fileURLToPath(new URL('../engines/native-catalog.json', import.meta.url));
+const catalogPath = existsSync(developmentCatalog) ? developmentCatalog : path.join(process.resourcesPath, 'engines', 'native-catalog.json');
 const exists = async p => !!p && !!(await fs.stat(p).catch(() => null))?.isFile();
 const aborted = signal => { if (signal?.aborted) throw new Error('작업이 취소되었습니다.'); };
 async function pause(ms, signal) { aborted(signal); await new Promise(resolve => setTimeout(resolve, ms)); aborted(signal); }
