@@ -1,5 +1,6 @@
 import {resolveClaudeExecutable} from './claude-discovery.mjs';
 import {runLyricsPipeline} from './lyrics-generation.mjs';
+import {runInstrumentalPlan} from './instrumental-plan.mjs';
 import {artPromptRequest,cleanArtPrompt} from './art-prompt.mjs';
 import {claudeBilling,withoutBillingCredentials} from './cli-billing.mjs';
 import { spawn } from 'node:child_process';
@@ -220,6 +221,11 @@ async function execute({ prompt, model, reasoningEffort = 'medium', cwd, signal,
 
 export async function generateLyrics(options) {
   return runLyricsPipeline(options, execute);
+}
+
+// Titles, style prompts and album art descriptions for a batch of instrumentals (one call per 20 tracks).
+export async function planInstrumentals(options) {
+  return runInstrumentalPlan(options, execute);
 }
 
 // Album art description for the local image model (Claude does not render images itself).

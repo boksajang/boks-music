@@ -8,7 +8,7 @@ import {claudeModels,claudeEfforts,agentProviders} from './claude.mjs';
 
 export function initialState(root) {
   return { version: 1, projects: [], tracks: [], playlists: [], videos: [], customPresets: [], jobs: [], settings: {
-    defaultCount: 1, autoAlbumArt: false, textModel: '', imageModel: '', textReasoning: 'medium', imageReasoning: 'medium', imageEngine: 'agent', localImageModel: '', videoBrand: 'BOKS MUSIC', videoDirectory: '', videoOptions: {}, videoPresets: [],
+    defaultCount: 1, autoAlbumArt: false, lyricBannedWords: [], textModel: '', imageModel: '', textReasoning: 'medium', imageReasoning: 'medium', imageEngine: 'agent', localImageModel: '', videoBrand: 'BOKS MUSIC', videoDirectory: '', videoOptions: {}, videoPresets: [],
     agentProvider: '', agentChoiceConfirmed: false, claudeModel: '', claudeReasoning: 'medium',
     projectPath: path.join(root,'projects'), modelPath: path.join(root,'models'),
     engineSelection:{...defaultEngineSelection}, musicBackend: 'yue2-cpp', nativeBackend: 'cuda', nativeExecutable: '', backbonePath: '', vaePath: '', transcriberPath: '',
@@ -44,6 +44,7 @@ export class Store {
       if(typeof data.settings.agentChoiceConfirmed!=='boolean')data.settings.agentChoiceConfirmed=false;
       if(!['agent','local'].includes(data.settings.imageEngine))data.settings.imageEngine='agent';
       if(typeof data.settings.localImageModel!=='string')data.settings.localImageModel='';
+      if(!Array.isArray(data.settings.lyricBannedWords))data.settings.lyricBannedWords=[];
       if(typeof data.settings.videoBrand!=='string'||data.settings.videoBrand.length>40)data.settings.videoBrand='BOKS MUSIC';
       if(typeof data.settings.videoDirectory!=='string')data.settings.videoDirectory='';
       if(!data.settings.videoOptions||typeof data.settings.videoOptions!=='object'||Array.isArray(data.settings.videoOptions))data.settings.videoOptions={};

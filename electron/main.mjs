@@ -8,6 +8,7 @@ import {lyricSubtitles,videoSubtitles} from './subtitles.mjs';
 import {alignTrackLyrics,ensureLyricRuntime,inspectLyricRuntime,lyricAlignmentSupport} from './lyric-alignment.mjs';
 import {analyzeLyricBatch} from './lyric-batch.mjs';
 import {normalizeLyrics,hashLyrics,validateLyricStarts,mergeLyricProgress,remapLyricTiming,preserveManualStarts,lyricTimingState} from './lyric-timing.mjs';
+import {cleanBannedWords} from './lyrics-generation.mjs';
 import {LYRIC_FILE_LIMITS,parseLyricTimingFile,planLyricTimingImport} from './lyric-file.mjs';
 import {localImageState,installImageVariant,generateLocalImage} from './image-engine.mjs';
 import {lyricLines,editLyricLine} from './lyric-lines.mjs';
@@ -38,8 +39,8 @@ import {presets} from './presets.mjs';
 import {inspectSystem,engineStates,clearEngineProbes,runEngine,installedEngineChoices} from './engine.mjs';
 import {installationOptions,installationRecommendation} from './compatibility.mjs';
 import {installRuntime,readInstalls} from './installer.mjs';
-import {inspectCodexInstallation,readCodexUsage,listCodexModels,generateLyrics,generateArt,writeArtPrompt as writeCodexArtPrompt,cancelCodexProcesses,validateCodexSettings} from './codex.mjs';
-import {inspectClaudeInstallation,readClaudeUsage,generateLyrics as generateClaudeLyrics,writeArtPrompt as writeClaudeArtPrompt,cancelClaudeProcesses,validateClaudeSettings,claudeModels,agentProviders} from './claude.mjs';
+import {inspectCodexInstallation,readCodexUsage,listCodexModels,generateLyrics,generateArt,planInstrumentals as planCodexInstrumentals,writeArtPrompt as writeCodexArtPrompt,cancelCodexProcesses,validateCodexSettings} from './codex.mjs';
+import {inspectClaudeInstallation,readClaudeUsage,generateLyrics as generateClaudeLyrics,planInstrumentals as planClaudeInstrumentals,writeArtPrompt as writeClaudeArtPrompt,cancelClaudeProcesses,validateClaudeSettings,claudeModels,agentProviders} from './claude.mjs';
 import {removeBillingCredentials,inspectCodexBilling} from './cli-billing.mjs';
 import {resolveCodexExecutable} from './codex-discovery.mjs';
 import {resolveAgents} from './agent-selection.mjs';
@@ -81,7 +82,7 @@ const resumingVideos=new Set();
 const pendingTimingFiles=new Map();
 const importPlaylist=id=>id?findById(store.data.playlists,id,'플레이리스트'):null;
 const trackBusy=t=>store.data.jobs.some(j=>['queued','running'].includes(j.status)&&(j.request?.trackId===t.id||j.request?.trackIds?.includes(t.id)));
-const AGENT_JOB_TYPES=new Set(['lyrics','albumArt']);
+const AGENT_JOB_TYPES=new Set(['lyrics','albumArt','instrumentalPlan']);
 const runner=path.join(app.isPackaged?process.resourcesPath:root,'engines','runner.py');
 const notify=()=>{if(window&&!window.isDestroyed())window.webContents.send('boks:update');};
 // Job progress (stage, percentage, remaining time) goes to the window as a small event at most every
@@ -321,6 +322,15 @@ async function rerunJob(id){
   await queue.dismiss(job.id);await removeJobFolder(job).catch(error=>log(error));
   return {jobId:(Array.isArray(started)?started[0]:started)?.id||started?.jobId};
 }
+// Generated audio is 48 kHz 24-bit stereo WAV (about 288 kB per second); job files add a little.
+const songBytes=seconds=>Math.ceil(seconds*288000*1.3);
+// The latest songs made in the app (any project; not imported), so AI lyrics avoid reusing their images and title words.
+function recentSongs(exclude=''){
+  const own=exclude?normalizeLyrics(exclude).lyricsHash:'';
+  return store.data.tracks.filter(t=>!t.trashedAt&&t.kind!=='stem'&&t.source!=='import'&&!t.instrumental&&typeof t.lyrics==='string'&&t.lyrics.trim()&&(!exclude||normalizeLyrics(t.lyrics).lyricsHash!==own))
+    .sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))).filter((t,i,rows)=>rows.findIndex(r=>r.title===t.title)===i).slice(0,8)
+    .map(t=>({title:t.title,excerpt:[...new Set(t.lyrics.split(/\r?\n/).map(line=>line.trim()).filter(line=>line&&!/^\[.*\]$/.test(line)))].join(' / ').slice(0,360)}));
+}
 async function workdir(projectId,jobId){const p=projectRecord(projectId);const dir=path.join(p.directory,'jobs',jobId);await ensureSpace(dir,256*1024*1024);return dir;}
 async function prepareAudio({audioPath,projectId,title,...metadata},{signal}={}){
   const s=await stat(audioPath);if(!s.isFile()||s.size<44)throw new Error('올바른 오디오 파일이 아닙니다.');
@@ -478,11 +488,21 @@ async function runJob(job,signal,onProgress){
   }
   if(request.operation==='lyrics'&&request.agent==='claude'){
     await assertSubscription('claude');
-    try{return await generateClaudeLyrics({prompt:request.prompt,lyrics:request.lyrics,currentTitle:request.currentTitle,style:request.style,mode:request.mode,model:request.settings.claudeModel,reasoningEffort:request.settings.claudeReasoning,cwd:dir,signal,onProgress,onUsage:usage=>void recordClaudeUsage(usage)});}
+    try{return await generateClaudeLyrics({prompt:request.prompt,lyrics:request.lyrics,currentTitle:request.currentTitle,style:request.style,mode:request.mode,targetSeconds:request.targetSeconds,recentSongs:request.recentSongs||[],bannedWords:request.settings.lyricBannedWords||[],model:request.settings.claudeModel,reasoningEffort:request.settings.claudeReasoning,cwd:dir,signal,onProgress,onUsage:usage=>void recordClaudeUsage(usage)});}
     finally{if(!quitting)void refreshClaudeUsage();}
   }
   if(request.operation==='lyrics')await assertSubscription('codex');
-  if(request.operation==='lyrics'){try{return await generateLyrics({prompt:request.prompt,lyrics:request.lyrics,currentTitle:request.currentTitle,style:request.style,mode:request.mode,model:request.settings.textModel,reasoningEffort:request.settings.textReasoning,cwd:dir,signal,onProgress});}finally{if(!quitting)void refreshCodexUsage();}}
+  if(request.operation==='lyrics'){try{return await generateLyrics({prompt:request.prompt,lyrics:request.lyrics,currentTitle:request.currentTitle,style:request.style,mode:request.mode,targetSeconds:request.targetSeconds,recentSongs:request.recentSongs||[],bannedWords:request.settings.lyricBannedWords||[],model:request.settings.textModel,reasoningEffort:request.settings.textReasoning,cwd:dir,signal,onProgress});}finally{if(!quitting)void refreshCodexUsage();}}
+  if(request.operation==='instrumentalPlan'){
+    await assertSubscription(request.agent);
+    const plan=request.agent==='claude'
+      ?await planClaudeInstrumentals({prompt:request.prompt,count:request.count,durationSeconds:request.instrumentalDuration,style:request.style,bannedWords:request.settings.lyricBannedWords||[],model:request.settings.claudeModel,reasoningEffort:request.settings.claudeReasoning,cwd:dir,signal,onProgress,onUsage:usage=>void recordClaudeUsage(usage)})
+      :await planCodexInstrumentals({prompt:request.prompt,count:request.count,durationSeconds:request.instrumentalDuration,style:request.style,bannedWords:request.settings.lyricBannedWords||[],model:request.settings.textModel,reasoningEffort:request.settings.textReasoning,cwd:dir,signal,onProgress});
+    if(signal.aborted)throw new Error('작업이 취소되었습니다.');
+    onProgress({stage:`${plan.length}곡을 생성 대기열에 등록하는 중`});
+    const jobs=await actions.generate({projectId:request.projectId,instrumental:true,instrumentalDuration:request.instrumentalDuration,tracks:plan});
+    return {planned:plan.map(({title,style})=>({title,style})),jobIds:jobs.map(item=>item.id)};
+  }
   if(request.operation==='albumArt'){
     const agents=await settledAgents();if(!agents.imageAgent)throw new Error(agents.imageReason);
     const t=track(request.trackId);
@@ -506,19 +526,23 @@ async function runJob(job,signal,onProgress){
   const row=await registerFinalTrack(request,result,{addAudio,signal});
   // Without an image agent the setting is shown as unavailable, so generation skips it quietly.
   if(request.settings.autoAlbumArt&&!signal.aborted&&(await settledAgents()).imageAgent){
-    try{onProgress({stage:'앨범아트 생성 중'});let artPath;if(request.settings.imageEngine==='local')artPath=await localArt(row,request.settings,{dir,signal,onProgress,jobId:job.id});else{await assertSubscription('codex');artPath=await generateArt({...row,model:request.settings.imageModel,reasoningEffort:request.settings.imageReasoning,cwd:dir,signal,onProgress});}if(!signal.aborted)await store.mutate(()=>{row.artPath=artPath;});}
+    try{onProgress({stage:'앨범아트 생성 중'});let artPath;if(request.settings.imageEngine==='local')artPath=await localArt(row,request.settings,{dir,signal,onProgress,jobId:job.id,prompt:request.artPrompt});else{await assertSubscription('codex');artPath=await generateArt({...row,model:request.settings.imageModel,reasoningEffort:request.settings.imageReasoning,cwd:dir,signal,onProgress});}if(!signal.aborted)await store.mutate(()=>{row.artPath=artPath;});}
     catch(e){await log(e,job.id);row.artError=e.message;}
   }
   return {trackId:row.id};
 }
 // Local album art: the active agent writes the description (on its subscription login), then the
 // installed local model renders it on this PC.
-async function localArt(t,settings,{dir,signal,onProgress,jobId}){
+async function localArt(t,settings,{dir,signal,onProgress,jobId,prompt:planned}){
+  // A description planned together with the track (AI instrumental planning) needs no further agent call.
+  let prompt=planned;
+  if(!prompt){
   const agent=(await settledAgents()).active;if(!agent)throw new Error('앨범아트 설명문을 쓸 AI 에이전트(Claude Code 또는 Codex)가 필요합니다.');
   await assertSubscription(agent);
   onProgress({stage:`${agent==='claude'?'Claude':'Codex'}가 앨범아트 설명문을 쓰는 중`});
   const write=agent==='claude'?writeClaudeArtPrompt:writeCodexArtPrompt;
-  const prompt=await write({title:t.title,lyrics:t.lyrics||'',style:t.style||'',model:agent==='claude'?settings.claudeModel:settings.imageModel,reasoningEffort:agent==='claude'?settings.claudeReasoning:settings.imageReasoning,cwd:dir,signal,onProgress:event=>onProgress({...event,stage:`앨범아트 설명문 · ${event.stage||''}`})});
+  prompt=await write({title:t.title,lyrics:t.lyrics||'',style:t.style||'',model:agent==='claude'?settings.claudeModel:settings.imageModel,reasoningEffort:agent==='claude'?settings.claudeReasoning:settings.imageReasoning,cwd:dir,signal,onProgress:event=>onProgress({...event,stage:`앨범아트 설명문 · ${event.stage||''}`})});
+  }
   await log(`앨범아트 설명문: ${prompt}`,jobId);
   let rendered;
   try{rendered=await generateLocalImage({root:store.data.settings.modelPath,system,variantId:settings.localImageModel,prompt,output:path.join(dir,`album-art-${id()}.png`),signal,onProgress,log:message=>log(message,jobId)});}
@@ -541,7 +565,8 @@ async function saveSettings(payload){
   if(typeof payload.autoAlbumArt==='boolean')next.autoAlbumArt=payload.autoAlbumArt;
   if(payload.imageEngine!==undefined){if(!['agent','local'].includes(payload.imageEngine))throw new Error('이미지 생성 엔진은 로컬 모델 또는 에이전트 중에서 선택하세요.');next.imageEngine=payload.imageEngine;}
   if(payload.localImageModel!==undefined&&payload.localImageModel!==store.data.settings.localImageModel){if(!localImage.checked||!localImage.installed.includes(payload.localImageModel))await refreshLocalImage();if(!localImage.installed.includes(payload.localImageModel))throw new Error('설치된 로컬 이미지 모델만 선택할 수 있습니다.');next.localImageModel=payload.localImageModel;}
-  if(payload.defaultCount!==undefined){const n=Number(payload.defaultCount);if(!Number.isInteger(n)||n<1||n>4)throw new Error('생성 개수는 1~4개입니다.');next.defaultCount=n;}
+  if(payload.lyricBannedWords!==undefined){if(!Array.isArray(payload.lyricBannedWords))throw new Error('가사 금지어 목록이 올바르지 않습니다.');const words=cleanBannedWords(payload.lyricBannedWords);if(words.length>200)throw new Error('가사 금지어는 200개까지 등록할 수 있습니다.');if(words.some(word=>word.length>30))throw new Error('가사 금지어는 한 단어에 30자까지 입력할 수 있습니다.');next.lyricBannedWords=words;}
+  if(payload.defaultCount!==undefined){const n=Number(payload.defaultCount);if(!Number.isInteger(n)||n<1)throw new Error('생성 개수는 1곡 이상으로 입력하세요.');next.defaultCount=n;}
   if(payload.engineSelection){for(const [role,id] of Object.entries(payload.engineSelection)){const match=installedEngineChoices(engines).find(e=>e.role===role&&e.id===id);if(!match)throw new Error('등록되지 않은 엔진입니다.');if(id!==next.engineSelection?.[role]&&!match.available)throw new Error(match.reason);}next.engineSelection={...next.engineSelection,...payload.engineSelection};}
   for(const key of ['projectPath','modelPath']){if(!path.isAbsolute(next[key]))throw new Error('저장 위치는 절대 경로로 입력하세요.');await ensureSpace(next[key],0);}
   // Running jobs use the settings copied when they were queued; engine locations and choices wait for them.
@@ -747,10 +772,22 @@ const actions={
   refreshCodex:async()=>{const [result]=await Promise.all([refreshCodex(),refreshCodexBilling()]);return result;},
   refreshModels:async()=>{await Promise.all([refreshCodex(),refreshCodexBilling()]);return codexModels;},
   generate:async p=>{
+    // Planned instrumentals (AI instrumental planning): one job per planned track with its own title, style and art description.
+    if(Array.isArray(p.tracks)){
+      if(!p.tracks.length)throw new Error('생성할 곡이 없습니다.');
+      const duration=validateInstrumentalDuration(p.instrumentalDuration);project(p.projectId);
+      const engine=engines.find(e=>e.id==='music');if(!engine?.available)throw new Error(engine?.message||'엔진 설치가 필요합니다.');
+      for(const row of p.tracks){assertYue2Input(row.style,'',true);requiredString(row.title,'제목',200);requiredString(row.style,'Style');}
+      await ensureSpace(project(p.projectId).directory,p.tracks.length*songBytes(duration));
+      const seeds=new Set();while(seeds.size<p.tracks.length)seeds.add(randomInt(0,2147483647));
+      return queue.add([...seeds].map((seed,i)=>({projectId:p.projectId,instrumental:true,instrumentalDuration:duration,operation:'generate',title:p.tracks[i].title.trim(),style:p.tracks[i].style.trim(),lyrics:'',seed,...(p.tracks[i].art?{artPrompt:p.tracks[i].art}:{}),settings:{...store.data.settings}})));
+    }
     assertYue2Input(p.style,p.lyrics,!!p.instrumental);
     if(p.instrumental)p={...p,instrumentalDuration:validateInstrumentalDuration(p.instrumentalDuration)};
     project(p.projectId);const style=requiredString(p.style,'Style');const title=typeof p.title==='string'&&p.title.trim()?requiredString(p.title,'제목',200):'새로운 곡';
-    const count=Number(p.count??store.data.settings.defaultCount);if(!Number.isInteger(count)||count<1||count>4)throw new Error('생성 개수는 1~4개입니다.');
+    // No upper limit (user decision 2026-10-30): every song is its own queued job; the disk must hold them all.
+    const count=Number(p.count??store.data.settings.defaultCount);if(!Number.isInteger(count)||count<1)throw new Error('생성 개수는 1곡 이상으로 입력하세요.');
+    await ensureSpace(project(p.projectId).directory,count*songBytes(p.instrumental?Number(p.instrumentalDuration)||240:300));
     const lyrics=p.instrumental?'':requiredString(p.lyrics,'가사');
     const operation=p.parentId?'cover':'generate';
     const engine=engines.find(e=>e.id===(operation==='cover'?'cover':'music'));if(!engine?.available)throw new Error(engine?.message||'엔진 설치가 필요합니다.');
@@ -788,6 +825,16 @@ const actions={
     if(job.request?.operation!=='lyrics'||job.status!=='completed')throw new Error('완료된 AI 가사 결과만 삭제할 수 있습니다.');
     await store.mutate(d=>{d.jobs=d.jobs.filter(item=>item.id!==job.id);});notify();
   },
+  planInstrumentals:async p=>{
+    project(p.projectId);const prompt=requiredString(p.prompt,'기획 요청');
+    const count=Number(p.count);if(!Number.isInteger(count)||count<1)throw new Error('생성 개수는 1곡 이상으로 입력하세요.');
+    const instrumentalDuration=validateInstrumentalDuration(p.instrumentalDuration),style=typeof p.style==='string'?p.style.slice(0,1000):'';
+    const engine=engines.find(e=>e.id==='music');if(!engine?.available)throw new Error(engine?.message||'엔진 설치가 필요합니다.');
+    await ensureSpace(project(p.projectId).directory,count*songBytes(instrumentalDuration));
+    const agents=await settledAgents();if(!agents.active)throw new Error(agents.reason);
+    if(agents.needsChoice)throw new Error('먼저 사용할 AI 에이전트를 선택하세요.');
+    const [job]=await queue.add([{operation:'instrumentalPlan',agent:agents.active,projectId:p.projectId,title:`AI 연주곡 기획 · ${count}곡`,prompt,count,instrumentalDuration,style,settings:{...store.data.settings}}]);return {jobId:job.id};
+  },
   lyrics:async p=>{const origin=project(p.projectId);const prompt=requiredString(p.prompt,'작사 요청');
     if(p.mode!==undefined&&!['create','edit'].includes(p.mode))throw new Error('올바른 작사 작업을 선택하세요.');
     const lyrics=p.mode==='edit'?requiredString(p.lyrics,'수정할 가사'):'';
@@ -796,7 +843,8 @@ const actions={
     const agents=await settledAgents();if(!agents.active)throw new Error(agents.reason);
     if(agents.needsChoice)throw new Error('먼저 사용할 AI 에이전트를 선택하세요.');
     const label=p.mode==='edit'?'AI 가사 수정':'AI 작사';
-    const [job]=await queue.add([{operation:'lyrics',agent:agents.active,projectId:p.projectId,title:agents.installed.codex&&agents.installed.claude?`${label} · ${agents.active==='claude'?'Claude':'Codex'}`:label,prompt,lyrics,currentTitle,style,mode:p.mode,settings:{...store.data.settings}}]);return {jobId:job.id};},
+    const targetSeconds=Number.isInteger(Number(p.targetSeconds))&&Number(p.targetSeconds)>=60&&Number(p.targetSeconds)<=600?Number(p.targetSeconds):undefined;
+    const [job]=await queue.add([{operation:'lyrics',agent:agents.active,targetSeconds,recentSongs:recentSongs(lyrics),projectId:p.projectId,title:agents.installed.codex&&agents.installed.claude?`${label} · ${agents.active==='claude'?'Claude':'Codex'}`:label,prompt,lyrics,currentTitle,style,mode:p.mode,settings:{...store.data.settings}}]);return {jobId:job.id};},
   chooseAgent:async p=>{
     if(!agentProviders.includes(p.provider))throw new Error('AI 에이전트는 Claude 또는 Codex 중에서 선택하세요.');
     if(!(await settledAgents()).available[p.provider])throw new Error(agentUnavailable(p.provider));

@@ -72,3 +72,7 @@ AI 에이전트는 로컬 CLI의 구독 로그인으로만 실행하며 유료 A
 | `video-templates/` | 가사·경음악 영상 템플릿 37종의 정보 파일(GPU 장면). 목록은 [video-templates/README.md](video-templates/README.md) |
 | `assets/` | 앱 아이콘 |
 | `scripts/` | 개발 실행(`dev.mjs`), 아이콘 생성(`icons.mjs`) |
+
+## 라이선스
+
+이 저장소의 소스 코드는 [MIT 라이선스](LICENSE)로 배포합니다. 앱이 설치·실행하는 엔진, 모델, 런타임과 AI CLI는 이 라이선스에 포함되지 않으며 각 배포처의 라이선스와 이용 조건을 따릅니다.

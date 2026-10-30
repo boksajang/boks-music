@@ -451,3 +451,21 @@ input.track-order-badge::-webkit-inner-spin-button,input.track-order-badge::-web
 .lyric-line-row.editing>button,.lyric-line-row.removing>button{margin:0;font-size:12px;min-height:34px;flex-shrink:0}
 .lyric-listen-summary.done{border-color:#5f8a5a;background:#2c4a2a40}.lyric-listen-summary.done strong{color:#bfe8a8}
 @media(hover:none){.lyric-line-tools{opacity:1}}
+.count-field{display:flex;align-items:stretch;gap:6px}
+.count-field>input{width:84px;text-align:center;margin:0;-moz-appearance:textfield}
+.count-field>input::-webkit-outer-spin-button,.count-field>input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.count-field>span{font-size:12px;color:#a2a9b6;align-self:center}
+.count-field>button{margin:0;width:46px;min-height:0;padding:0;font-size:16px;line-height:1}
+.instrumental-note{height:auto;min-height:240px;padding:22px 18px;text-align:center}
+.instrumental-note>.instrumental-ai{margin:2px 0 0;display:inline-flex;align-items:center;gap:6px;font-size:12px;min-height:36px}
+.instrumental-note>small{display:block;margin-top:-8px;font-size:11px;color:#8d99b0;line-height:1.6}
+.banned-words-label{margin-top:18px}
+.banned-words-input{display:flex;gap:6px}
+.banned-words-input>input{flex:1;min-width:0;margin:0}
+.banned-words-input>button{margin:0;flex:none}
+.banned-word-list{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.banned-word-list>li{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:3px 4px 3px 10px;border:1px solid #3a4150;border-radius:999px;background:#1d222b;font-size:12px;color:#d5dae3}
+.banned-word-list>li>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.banned-word-list>li>button{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;min-height:0;margin:0;padding:0;border:0;border-radius:50%;background:transparent;color:#8d99b0}
+.banned-word-list>li>button:hover{background:#2c3340;color:#eef1f6}
+.banned-words>.field-help{word-break:keep-all}
