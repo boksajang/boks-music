@@ -66,7 +66,7 @@ export async function deleteProject(store, id) {
   return {deletedProjectId:id,movedIds:rows.map(row=>row.id)};
 }
 async function inspect(file) {
-  try {return await lstat(file);} catch(error) {if(error.code==='ENOENT')return null;throw error;}
+  try {return await lstat(file);} catch(error) {if(['ENOENT','ENOTDIR'].includes(error.code))return null;throw error;}
 }
 // Check every existing ancestor, including the project directory itself. A lexical
 // project prefix alone is insufficient when a junction redirects into other data.
@@ -92,7 +92,10 @@ function ownedLocation(data,row,file) {
   if(data.settings?.modelPath && path.isAbsolute(data.settings.modelPath) && (same(data.settings.modelPath,resolved)||within(data.settings.modelPath,resolved))) throw new Error('모델 경로는 삭제할 수 없습니다.');
   const relative=path.relative(root,resolved).split(path.sep);
   if(relative[0]==='imports' && relative.length===2) return {file:resolved,root:null};
-  if(relative[0]==='jobs' && relative.length>=3 && data.jobs.some(job=>job.id===relative[1] && (!job.request?.projectId || (job.request.storageProjectId||job.request.projectId)===storageProjectId))) return {file:resolved,root:path.join(root,'jobs',relative[1])};
+  // A job folder of the owning project. Its job record may be gone (finished records are pruned after
+  // 30 days); a record that names another owner keeps the folder out of reach.
+  const job=relative[0]==='jobs'?data.jobs.find(item=>item.id===relative[1]):null;
+  if(relative[0]==='jobs' && relative.length>=3 && (!job || !job.request?.projectId || (job.request.storageProjectId||job.request.projectId)===storageProjectId)) return {file:resolved,root:path.join(root,'jobs',relative[1])};
   throw new Error('알려진 작업 폴더 또는 가져온 파일만 삭제할 수 있습니다.');
 }
 function checkProtected(data,file) {
@@ -133,9 +136,14 @@ export async function purgeTrash(store, ids) {
   for(const file of [...retained]) {
     if(!path.isAbsolute(file))throw new Error('보존할 파일 경로를 확인할 수 없어 삭제를 중단했습니다.');
     try {retained.push(await realpath(file));}
-    catch(error) {if(error.code!=='ENOENT')throw new Error('보존할 파일 참조를 확인할 수 없어 삭제를 중단했습니다.',{cause:error});}
+    catch(error) {if(!['ENOENT','ENOTDIR'].includes(error.code))throw new Error('보존할 파일 참조를 확인할 수 없어 삭제를 중단했습니다.',{cause:error});}
   }
-  const locations=rows.flatMap(row=>references(row).map(file=>ownedLocation(data,row,file)));
+  // Permanent deletion always removes the songs from the library. A file that is already gone needs
+  // nothing, and a path the app does not manage (or cannot check safely) is left on disk, never a reason
+  // to keep the songs in the trash.
+  const skipped=[];
+  const skip=(file,error)=>{skipped.push({file,reason:error.message});return [];};
+  const locations=rows.flatMap(row=>references(row).flatMap(file=>{try{return [ownedLocation(data,row,file)];}catch(error){return skip(file,error);}}));
   const historical=[];
   for(const job of data.jobs) {
     const operation=job.type||job.request?.operation;
@@ -146,23 +154,26 @@ export async function purgeTrash(store, ids) {
     const associated=rows.filter(row=>resultIds.includes(row.id)||(operation!=='mastering'&&job.request?.trackId===row.id));
     if(!associated.length)continue;
     const projectId=job.request?.storageProjectId||job.request?.projectId;
-    if(!projectId || associated.some(row=>(row.storageProjectId||row.projectId)!==projectId))throw new Error('이전 작업의 프로젝트 소유 관계를 확인할 수 없습니다.');
+    if(!projectId || associated.some(row=>(row.storageProjectId||row.projectId)!==projectId)){skip(job.id,new Error('이전 작업의 프로젝트 소유 관계를 확인할 수 없습니다.'));continue;}
     const project=data.projects.find(item=>item.id===projectId);
-    if(!project || !path.isAbsolute(project.directory||'') || typeof job.id!=='string' || !job.id || job.id==='.' || job.id==='..' || /[\\/]/.test(job.id))throw new Error('이전 작업 폴더 경로가 올바르지 않습니다.');
+    if(!project || !path.isAbsolute(project.directory||'') || typeof job.id!=='string' || !job.id || job.id==='.' || job.id==='..' || /[\\/]/.test(job.id)){skip(job.id,new Error('이전 작업 폴더 경로가 올바르지 않습니다.'));continue;}
     const candidate=path.join(project.directory,'jobs',job.id,'ownership-check');
-    historical.push(ownedLocation(data,associated[0],candidate).root);
+    try{historical.push(ownedLocation(data,associated[0],candidate).root);}catch(error){skip(candidate,error);}
   }
   const jobRoots=[...new Set([...locations.map(item=>item.root),...historical].filter(Boolean))];
   const clearRoots=jobRoots.filter(root=>!retained.some(file=>same(root,file)||within(root,file)));
   const files=new Map(), directories=new Map();
   // Preflight all selected paths even if a shared reference will preserve them.
   for(const location of locations) {
-    const stat=await checkPath(location.file);
-    if(stat && !stat.isFile()) throw new Error('곡 파일 경로가 일반 파일이 아닙니다.');
-    if(!clearRoots.some(root=>within(root,location.file)) && !retained.some(file=>same(file,location.file))) files.set(key(location.file),location.file);
+    let stat;
+    try{stat=await checkPath(location.file);}catch(error){skip(location.file,error);continue;}
+    if(stat && !stat.isFile()){skip(location.file,new Error('곡 파일 경로가 일반 파일이 아닙니다.'));continue;}
+    if(stat && !clearRoots.some(root=>within(root,location.file)) && !retained.some(file=>same(file,location.file))) files.set(key(location.file),location.file);
   }
+  // A job folder is planned as a whole, so one with a redirected or unusual entry is left untouched.
   for(const root of clearRoots) {
-    const plan=await treePlan(root,data);
+    let plan;
+    try{plan=await treePlan(root,data);}catch(error){skip(root,error);continue;}
     for(const file of plan.files) files.set(key(file),file);
     for(const directory of plan.directories) directories.set(key(directory),directory);
   }
@@ -183,7 +194,7 @@ export async function purgeTrash(store, ids) {
   } catch(cause) {
     throw new Error('영구 삭제가 완료되지 않았습니다. 휴지통 항목은 보존되었습니다. 원인을 해결한 후 다시 시도하세요.',{cause});
   }
-  return {deletedIds:rows.map(row=>row.id)};
+  return {deletedIds:rows.map(row=>row.id),...(skipped.length?{skippedFiles:skipped}:{})};
 }
 
 /**

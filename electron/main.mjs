@@ -143,6 +143,7 @@ async function purgeTracksCompletely(ids){
     vocalKeys.set(row.id,[...keys]);
   }
   const result=await updateTrash(purgeTrash,ids);
+  for(const item of result.skippedFiles||[])log(`영구 삭제: 남겨 둔 파일 ${item.file} · ${item.reason}`);
   const deleted=new Set(result.deletedIds||[]),survivors=new Set(store.data.tracks.flatMap(row=>row.vocalCacheKeys||[]));
   await removeVocalCache(vocalCache().root,[...vocalKeys].filter(([id])=>deleted.has(id)).flatMap(([,keys])=>keys).filter(key=>!survivors.has(key))).catch(error=>log(error));
   notify();return result;
