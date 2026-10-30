@@ -710,13 +710,6 @@ const actions={
     const result=await dialog.showSaveDialog(window,{title:'자막(SRT) 내보내기',defaultPath:fileSafe(row.title)+'.srt',filters:[{name:'SRT',extensions:['srt']}]});
     if(result.canceled||!result.filePath)return null;await writeFile(result.filePath,'\ufeff'+text,'utf8');return {fileName:path.basename(result.filePath),count,missing};
   },
-  saveThumbnail:async p=>{
-    const match=/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(typeof p?.dataUrl==='string'?p.dataUrl:'');
-    const bytes=match&&Buffer.from(match[1],'base64');
-    if(!bytes||bytes.length>20*1024*1024||bytes.subarray(0,8).toString('hex')!=='89504e470d0a1a0a')throw new Error('썸네일 이미지를 만들지 못했습니다.');
-    const result=await dialog.showSaveDialog(window,{title:'썸네일 저장',defaultPath:path.join(store.data.settings.videoDirectory||app.getPath('pictures'),fileSafe(p.name)+'.png'),filters:[{name:'PNG',extensions:['png']}]});
-    if(result.canceled||!result.filePath)return null;await writeFile(result.filePath,bytes);return {fileName:path.basename(result.filePath)};
-  },
   dismissLyricConfirmation:async p=>{
     const job=findById(store.data.jobs,p?.jobId,'가사 분석');
     if(job.type!=='lyricsAlign'||job.status!=='needs-confirmation')return;
