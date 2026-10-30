@@ -479,14 +479,24 @@ async function runJob(job,signal,onProgress){
   if(request.operation==='youtubeExtract')return youtubeImporter.extract(request.url,{signal,onProgress,log:message=>log(message,job.id)});
   if(request.operation==='youtubeImport'){
     const origin=findById(store.data.jobs,request.extractionJobId,'추출 결과');
-    const result=await youtubeImporter.finalize(origin.result.sessionId,request.format,dir,{signal,onProgress,log:message=>log(message,job.id)});
+    const result=await youtubeImporter.finalize(origin.result.sessionId,request.format,dir,{subtitle:request.subtitle,signal,onProgress,log:message=>log(message,job.id)});
     if(!inside(await realpath(dir),await realpath(result.audioPath)))throw new Error('가져온 음악의 결과 경로가 잘못되었습니다.');
     const row=await prepareAudio({audioPath:result.audioPath,projectId:request.projectId,title:result.title,kind:'original',source:'import',importedAt:new Date().toISOString(),lyrics:'',style:'가져온 음악',metadata:result.metadata},{signal});
+    // The uploader's subtitle becomes the lyrics with confirmed line starts, as an uploaded LRC/SRT file would.
+    let subtitle;
+    if(result.subtitle){
+      try{
+        const plan=planLyricTimingImport({entries:result.subtitle.entries,lyrics:'',duration:row.duration}),now=new Date().toISOString();
+        row.lyrics=plan.lyrics;
+        row.lyricTiming={lyricsHash:normalizeLyrics(plan.lyrics).lyricsHash,duration:row.duration,cues:plan.cues,automation:{version:2,timingMode:'line-starts',needsConfirmation:[]},source:{format:result.subtitle.format,fileName:`YouTube 자막 · ${result.subtitle.label}`,importedAt:now},analyzedAt:now,reviewedAt:now};
+        subtitle={label:result.subtitle.label,lines:plan.lines.length};
+      }catch(error){subtitle={label:result.subtitle.label,skipped:error.message};await log(`YouTube subtitle not applied: ${error.message}`,job.id);}
+    }
     await commitImportedTrack(store,row,origin,signal);notify();
     // A playlist deleted during the extraction no longer receives the song (the project does).
     if(request.importPlaylistId){if(store.data.playlists.some(item=>item.id===request.importPlaylistId)){await addToPlaylist(store,{playlistId:request.importPlaylistId,ids:[row.id]});notify();}else await log('가져온 음악을 담을 플레이리스트가 삭제되어 프로젝트에만 저장했습니다.',job.id);}
     await youtubeImporter.discard(origin.result.sessionId).catch(error=>log(error,job.id));
-    return {trackId:row.id};
+    return {trackId:row.id,...(subtitle?{subtitle}:{})};
   }
   if(request.operation==='lyrics'&&request.agent==='claude'){
     await assertSubscription('claude');
@@ -801,9 +811,11 @@ const actions={
     const origin=findById(store.data.jobs,p.jobId,'추출 결과');
     if(origin.type!=='youtubeExtract'||origin.status!=='completed'||!origin.result?.sessionId||origin.result.discarded||origin.result.expired)throw new Error('추출을 완료한 후 저장 형식을 선택하세요.');
     if(origin.result.importedTrackId)throw new Error('이미 가져온 음악입니다.');
+    const subtitles=origin.result.subtitles||[];
+    if(subtitles.length>1&&p.subtitle!=='none'&&!subtitles.some(item=>item.id===p.subtitle))throw new Error('가사로 가져올 자막 언어를 선택하세요.');
     if(youtubeFinishing.has(origin.id)||store.data.jobs.some(job=>job.request?.extractionJobId===origin.id&&['queued','running','completed'].includes(job.status)))throw new Error('이미 가져오는 중이거나 완료된 음악입니다.');
     youtubeFinishing.add(origin.id);
-    try {project(origin.request.projectId);const [job]=await queue.add([{operation:'youtubeImport',projectId:origin.request.projectId,...(origin.request.playlistId?{importPlaylistId:origin.request.playlistId}:{}),extractionJobId:origin.id,format:p.format,title:origin.result.title||'유튜브 음악 가져오기',settings:{...store.data.settings}}]);return {jobId:job.id};}
+    try {project(origin.request.projectId);const [job]=await queue.add([{operation:'youtubeImport',projectId:origin.request.projectId,...(origin.request.playlistId?{importPlaylistId:origin.request.playlistId}:{}),extractionJobId:origin.id,format:p.format,...(subtitles.length>1?{subtitle:p.subtitle}:{}),title:origin.result.title||'유튜브 음악 가져오기',settings:{...store.data.settings}}]);return {jobId:job.id};}
     finally{youtubeFinishing.delete(origin.id);}
   },
   discardYoutube:async p=>{

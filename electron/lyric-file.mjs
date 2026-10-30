@@ -97,6 +97,28 @@ export function parseLrc(text){
   return entries;
 }
 
+// WebVTT (YouTube subtitles) as SRT text: the header and NOTE/STYLE/REGION blocks have no time line and are
+// dropped, as are cue identifiers; cue settings after the times are ignored by the SRT reader.
+const ENTITIES={amp:'&',quot:'"',apos:"'",nbsp:' ',lrm:'',rlm:''};
+export function vttToSrt(text){
+  const cues=[];
+  for(const block of text.replace(/^﻿/,'').replace(/\r\n?/g,'\n').split(/\n[ \t]*\n/)){
+    const lines=block.split('\n'),time=lines.findIndex(line=>line.includes('-->'));
+    if(time>=0)cues.push(lines.slice(time).join('\n'));
+  }
+  if(!cues.length)throw new Error('자막에서 시간을 찾지 못했습니다.');
+  const decode=value=>value.replace(/&(#\d+|#x[\da-f]+|[a-z]+);/gi,(whole,name)=>name[0]==='#'?String.fromCodePoint(parseInt(name.slice(1).replace(/^x/i,''),/^#x/i.test(name)?16:10)):ENTITIES[name.toLowerCase()]??whole);
+  return cues.map((cue,index)=>`${index+1}\n${decode(cue)}`).join('\n\n')+'\n';
+}
+
+// A subtitle the uploader added to a YouTube video (VTT or SRT) as timed lyric lines. Music note signs
+// around the words are not lyrics.
+export function parseSubtitleFile({format,bytes}){
+  if(!['VTT','SRT'].includes(format))throw new Error('VTT 또는 SRT 자막만 읽을 수 있습니다.');
+  const text=decodeLyricFile(bytes);
+  return parseLrc(srtToLrc(format==='VTT'?vttToSrt(text):text).replace(/[♪♫♬]/g,' '));
+}
+
 export function parseLyricTimingFile({name,bytes}){
   const format=lyricFileFormat(name),text=decodeLyricFile(bytes);
   return {format,entries:parseLrc(format==='SRT'?srtToLrc(text):text)};

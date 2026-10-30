@@ -4,6 +4,7 @@ import {mkdir,mkdtemp,readFile,readdir,realpath,rm,stat,chmod} from 'node:fs/pro
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {downloadVerified} from './download.mjs';
+import {parseSubtitleFile} from './lyric-file.mjs';
 
 export const youtubeRelease='2026.08.19';
 export const youtubeAssets={
@@ -20,6 +21,14 @@ export function validateYoutubeUrl(value){
 export function downloadProgress(line){
  if(!line.startsWith('BOKS_PROGRESS:'))return null;
  try{const p=JSON.parse(line.slice(14));const downloadedBytes=Number(p.downloaded_bytes)||0,totalBytes=Number(p.total_bytes)||Number(p.total_bytes_estimate)||0;return {stage:'YouTube 오디오 다운로드 중',downloadedBytes,...(totalBytes>0?{totalBytes,progress:Math.min(100,downloadedBytes/totalBytes*100)}:{})};}catch{return null;}
+}
+// Korean names for subtitle languages; a track id with the uploader's own suffix (en-uYU-...) keeps
+// YouTube's name, and two tracks of one language are told apart by that name or their id.
+export function subtitleLabels(tracks){
+ const names=(()=>{try{return new Intl.DisplayNames(['ko'],{type:'language'});}catch{return null;}})();
+ const label=({id,name})=>{try{if(/^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/.test(id))return names?.of(id)||name||id;}catch{}return name||id;};
+ const labels=tracks.map(label);
+ return labels.map((text,index)=>labels.indexOf(text)!==labels.lastIndexOf(text)?`${text} · ${tracks[index].name&&tracks[index].name!==text?tracks[index].name:tracks[index].id}`:text);
 }
 export function runYoutubeProcess(executable,args,{signal,onLine=()=>{},log=()=>{}}={}){
  return new Promise((resolve,reject)=>{
@@ -60,8 +69,27 @@ export function createYoutubeImporter({packageRoot,sessionRoot,ffmpegPath,nodePa
    if(files.length!==1)throw new Error('추출된 오디오 파일을 확인할 수 없습니다.');
    const audioPath=await realpath(path.join(dir,files[0]));if(path.dirname(audioPath)!==await realpath(dir)||(await stat(audioPath)).size<1)throw new Error('오디오 결과 경로가 올바르지 않습니다.');
    signal?.throwIfAborted();
-   const result={sessionId,title:String(info.title||'YouTube 오디오').slice(0,500),duration:Number(info.duration)||0,sourceUrl};sessions.set(sessionId,{...result,dir,audioPath,busy:false});return result;
+   const subtitles=await uploaderSubtitles(tool,dir,info,{signal,log,onProgress});
+   const result={sessionId,title:String(info.title||'YouTube 오디오').slice(0,500),duration:Number(info.duration)||0,sourceUrl,subtitles:subtitles.readable.map(({id,label,lines})=>({id,label,lines})),...(subtitles.unreadable?{unreadableSubtitles:subtitles.unreadable}:{})};
+   sessions.set(sessionId,{...result,subtitles:subtitles.readable,dir,audioPath,busy:false});return result;
   }catch(error){await remove({dir});throw error;}
+ }
+ // Subtitles the uploader added (info.subtitles) become the song's timed lyrics; YouTube's automatic
+ // captions rarely hear sung words and are never fetched. A subtitle problem never fails the import.
+ async function uploaderSubtitles(tool,dir,info,{signal,log,onProgress}){
+  const tracks=Object.entries(info.subtitles||{}).filter(([id,formats])=>id!=='live_chat'&&Array.isArray(formats)&&formats.length).map(([id,formats])=>({id,name:String(formats.find(item=>item?.name)?.name||'')}));
+  if(!tracks.length)return {readable:[],unreadable:0};
+  onProgress({stage:'업로더 자막 확인 중'});
+  try{await run(tool,['--ignore-config','--no-plugin-dirs','--no-update','--no-cache-dir','--socket-timeout','30','--retries','3','--load-info-json',path.join(dir,'source.info.json'),'--skip-download','--write-subs','--sub-langs','all,-live_chat','--sub-format','vtt/srt','--output',path.join(dir,'subtitle.%(ext)s')],{signal,log});}
+  catch(error){if(signal?.aborted)throw error;log(`YouTube subtitles skipped: ${error.message}`);return {readable:[],unreadable:tracks.length};}
+  const files=await readdir(dir),labels=subtitleLabels(tracks),readable=[];
+  for(const [index,track] of tracks.entries()){
+   const file=files.find(name=>name===`subtitle.${track.id}.vtt`||name===`subtitle.${track.id}.srt`);
+   if(!file){log(`YouTube subtitle ${track.id}: no VTT/SRT file`);continue;}
+   try{const entries=parseSubtitleFile({format:file.endsWith('.vtt')?'VTT':'SRT',bytes:await readFile(path.join(dir,file))});readable.push({id:track.id,label:labels[index],lines:entries.length,format:file.endsWith('.vtt')?'VTT':'SRT',entries});}
+   catch(error){log(`YouTube subtitle ${track.id} unreadable: ${error.message}`);}
+  }
+  return {readable,unreadable:tracks.length-readable.length};
  }
  async function extract(value,options={}){
   for(let attempt=0;attempt<3;attempt++){
@@ -75,9 +103,12 @@ export function createYoutubeImporter({packageRoot,sessionRoot,ffmpegPath,nodePa
    }
   }
  }
- async function finalize(id,format,outputDir,{signal,onProgress=()=>{},log=()=>{}}={}){
+ // subtitle: the language chosen when the uploader added several ('none' takes none); a single one is taken.
+ async function finalize(id,format,outputDir,{subtitle,signal,onProgress=()=>{},log=()=>{}}={}){
   if(!['wav','mp3'].includes(format))throw new Error('WAV 또는 MP3 형식을 선택하세요.');
   const s=sessions.get(id);if(!s||s.busy)throw new Error('추출 세션이 없거나 이미 저장 중입니다. 다시 추출하세요.');
+  const lyrics=s.subtitles.length===1?s.subtitles[0]:s.subtitles.find(item=>item.id===subtitle);
+  if(s.subtitles.length>1&&!lyrics&&subtitle!=='none')throw new Error('가사로 가져올 자막 언어를 선택하세요.');
   let ffmpeg=typeof ffmpegPath==='function'?await ffmpegPath():ffmpegPath;
   if(!ffmpeg&&platform==='win32')for(const profile of ['stems-cuda','stems-cpu']){const candidate=path.join(packageRoot,'runtimes',profile,profile,'Scripts','ffmpeg.exe');try{if((await stat(candidate)).isFile()){ffmpeg=candidate;break;}}catch{}}
   if(!ffmpeg)throw new Error('FFmpeg 오디오 도구 설치가 필요합니다.');
@@ -85,7 +116,7 @@ export function createYoutubeImporter({packageRoot,sessionRoot,ffmpegPath,nodePa
   try{await mkdir(outputDir,{recursive:true});onProgress({stage:`${format.toUpperCase()} 오디오 저장 중`});
    await run(ffmpeg,['-hide_banner','-nostdin','-n','-i',s.audioPath,'-vn','-map','0:a:0',...(format==='wav'?['-c:a','pcm_s16le']:['-c:a','libmp3lame','-b:a','320k']),'-progress','pipe:1','-nostats',audioPath],{signal,log,onLine:line=>{const match=line.match(/^out_time_us=(\d+)$/);if(match)onProgress({stage:`${format.toUpperCase()} 오디오 저장 중`,...(s.duration>0?{progress:Math.min(99,Number(match[1])/1e6/s.duration*100)}:{})});}});
    if((await stat(audioPath)).size<44)throw new Error('변환된 오디오가 비어 있습니다.');
-   return {audioPath,title:s.title,metadata:{source:'youtube',sourceUrl:s.sourceUrl,format,ytDlpVersion:youtubeRelease,...(format==='mp3'?{bitrateKbps:320}:{})}};
+   return {audioPath,title:s.title,metadata:{source:'youtube',sourceUrl:s.sourceUrl,format,ytDlpVersion:youtubeRelease,...(format==='mp3'?{bitrateKbps:320}:{})},...(lyrics?{subtitle:{id:lyrics.id,label:lyrics.label,format:lyrics.format,entries:lyrics.entries}}:{})};
   }catch(error){await rm(audioPath,{force:true});if(signal?.aborted){sessions.delete(id);await remove(s);}throw error;}finally{s.busy=false;}
  }
  async function cleanupExpired(){

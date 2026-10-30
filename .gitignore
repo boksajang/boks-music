@@ -80,3 +80,6 @@ Desktop.ini
 
 # App data in development (library, logs, caches, Chromium profile, temp)
 /app-data/
+
+# Local sample media
+/sample/
