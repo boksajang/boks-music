@@ -1,16 +1,19 @@
-﻿param([string]$RuntimeRoot='', [string]$ModelRoot='')
+﻿param([string]$RuntimeRoot='', [string]$ModelRoot='', [string]$PackageRoot='')
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 $env:PYTHONIOENCODING='utf-8'
 $project=Split-Path $PSScriptRoot -Parent
-if(!$RuntimeRoot){$RuntimeRoot=Join-Path $project 'engine-packages/runtimes/lyrics-alignment'}
-if(!$ModelRoot){$ModelRoot=Join-Path $project 'engine-packages/models/lyrics-alignment'}
+# An installed app keeps engine-packages in its data folder, not beside these scripts: the app passes it.
+if(!$PackageRoot){$PackageRoot=Join-Path $project 'engine-packages'}
+$PackageRoot=[IO.Path]::GetFullPath($PackageRoot)
+if(!$RuntimeRoot){$RuntimeRoot=Join-Path $PackageRoot 'runtimes/lyrics-alignment'}
+if(!$ModelRoot){$ModelRoot=Join-Path $PackageRoot 'models/lyrics-alignment'}
 $RuntimeRoot=[IO.Path]::GetFullPath($RuntimeRoot);$ModelRoot=[IO.Path]::GetFullPath($ModelRoot)
-$packagePrefix=[IO.Path]::GetFullPath((Join-Path $project 'engine-packages')).TrimEnd('\')+'\'
+$packagePrefix=$PackageRoot.TrimEnd('\')+'\'
 foreach($location in @($RuntimeRoot,$ModelRoot)){if(!$location.StartsWith($packagePrefix,[StringComparison]::OrdinalIgnoreCase)){throw '가사 정렬 설치는 프로젝트 engine-packages 내부만 허용합니다.'}}
 $uv=$null;$base=$null;$torchIndex='https://download.pytorch.org/whl/cu128'
 foreach($profile in @('stems-cuda','stems-cpu')){
-    $stemRoot=Join-Path $project ('engine-packages/runtimes/'+$profile)
+    $stemRoot=Join-Path $PackageRoot ('runtimes/'+$profile)
     $candidate=Join-Path $stemRoot 'uv.exe';$pythonRoot=Join-Path $stemRoot 'python'
     if((Test-Path -LiteralPath $candidate) -and (Test-Path -LiteralPath $pythonRoot)){
         $base=Get-ChildItem -LiteralPath $pythonRoot -Filter python.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName
