@@ -941,8 +941,10 @@ function finishClose(){
 }
 function requestClose(quitApp=false){
   if(quitting||shutdownStarted)return;
-  if(quitApp&&!quitRequested&&queue?.processing&&window&&!window.isDestroyed()){
-    const choice=dialog.showMessageBoxSync(window,{type:'question',buttons:['계속 작업','작업 취소 후 종료'],defaultId:0,cancelId:0,message:'진행 중인 작업을 취소하고 종료할까요?'});
+  // On macOS jobs keep running after the window is closed, so quitting from the Dock or Cmd+Q asks without a window.
+  if(quitApp&&!quitRequested&&queue?.processing){
+    const options={type:'question',buttons:['계속 작업','작업 취소 후 종료'],defaultId:0,cancelId:0,message:'진행 중인 작업을 취소하고 종료할까요?'};
+    const choice=window&&!window.isDestroyed()?dialog.showMessageBoxSync(window,options):dialog.showMessageBoxSync(options);
     if(choice===0)return;
   }
   quitRequested=quitRequested||quitApp;
@@ -980,6 +982,8 @@ async function createWindow(){
 
 if(ownsInstance)void app.whenReady().then(async()=>{
 try{
+  // The window icon is ignored on macOS; a development run would show Electron's icon in the Dock.
+  if(isMac&&!app.isPackaged)app.dock?.setIcon(path.join(root,'assets','icon.png'));
   await mkdir(path.dirname(appPaths.log),{recursive:true});await clearTempFolder(dataRoot);
   store=await new Store(app.getPath('userData')).init();
   // Composer drafts live for this app session; saved songs and job requests remain intact.

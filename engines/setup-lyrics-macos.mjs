@@ -3,8 +3,10 @@ import {spawn} from 'node:child_process';
 import {mkdir,readdir,access} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-const here=path.dirname(fileURLToPath(import.meta.url)),project=path.dirname(here),packages=path.join(project,'engine-packages');
+const here=path.dirname(fileURLToPath(import.meta.url)),project=path.dirname(here);
 const arg=(key,fallback)=>{const i=process.argv.indexOf(key);return i<0?fallback:process.argv[i+1];};
+// An installed app keeps engine-packages in its data folder, not beside these scripts: the app passes it.
+const packages=path.resolve(arg('--package-root',path.join(project,'engine-packages')));
 const runtime=path.resolve(arg('--runtime-root',path.join(packages,'runtimes','lyrics-alignment'))),models=path.resolve(arg('--model-root',path.join(packages,'models','lyrics-alignment')));
 const event=(type,fields)=>console.log(JSON.stringify({type,...fields}));
 const exists=async file=>{try{await access(file);return true;}catch{return false;}};

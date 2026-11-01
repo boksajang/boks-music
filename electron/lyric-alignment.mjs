@@ -81,7 +81,7 @@ export async function ensureLyricRuntime({packageRoot,engineDirectory},context={
   context.onProgress?.({stage:'가사 분석 모델과 실행 환경 준비 중'});
   let result;
   if(process.platform==='win32')result=await processJson('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(engineDirectory,'setup-lyrics.ps1'),'-RuntimeRoot',runtimeRoot,'-ModelRoot',modelRoot],context);
-  else if(process.platform==='darwin')result=await processJson(process.execPath,[path.join(engineDirectory,'setup-lyrics-macos.mjs'),'--runtime-root',runtimeRoot,'--model-root',modelRoot],{...context,env:{ELECTRON_RUN_AS_NODE:'1'}});
+  else if(process.platform==='darwin')result=await processJson(process.execPath,[path.join(engineDirectory,'setup-lyrics-macos.mjs'),'--package-root',packageRoot,'--runtime-root',runtimeRoot,'--model-root',modelRoot],{...context,env:{ELECTRON_RUN_AS_NODE:'1'}});
   else throw new Error('가사 분석은 Windows와 macOS에서 지원합니다.');
   if(path.resolve(result.pythonPath)!==path.resolve(pythonPath))throw new Error('가사 분석 런타임 경로가 올바르지 않습니다.');
   await access(pythonPath);await verifyModelFiles(modelRoot);await mkdir(runtimeRoot,{recursive:true});await writeFile(receipt,JSON.stringify({platform:process.platform,pythonPath,modelRoot}));return {pythonPath,modelRoot};

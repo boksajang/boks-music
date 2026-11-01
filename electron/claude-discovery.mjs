@@ -40,6 +40,8 @@ export function resolveClaudeExecutable({env=process.env,platform=process.platfo
   // Native installer default, then platform package managers.
   if(home&&paths.isAbsolute(home))add(paths.join(home,'.local','bin'));
   if(mac)['/opt/homebrew/bin','/usr/local/bin'].forEach(add);
+  // An app opened from Finder gets a minimal PATH: Node version managers' shim folders are added like Codex does.
+  if(mac)[variable('NVM_BIN'),variable('VOLTA_HOME')&&paths.join(variable('VOLTA_HOME'),'bin'),home&&paths.join(home,'.volta','bin')].forEach(add);
   for(const directory of directories){const file=paths.join(directory,basename);if(native(file))return direct(file);}
   const roots=[];
   const addRoot=root=>{if(root&&paths.isAbsolute(root)&&!roots.includes(root))roots.push(root);};

@@ -9,6 +9,8 @@ const send=value=>new Promise(resolve=>process.stdout.write(JSON.stringify(value
 const profile=argument('--boks-canvas-profile');
 if(profile)app.setPath('userData',profile);
 app.on('window-all-closed',()=>{});
+// A second Dock icon would appear on macOS while a video renders.
+if(process.platform==='darwin')app.dock?.hide();
 app.whenReady().then(async()=>{
  try{
   const request=JSON.parse(await readFile(argument('--boks-canvas-render'),'utf8'));

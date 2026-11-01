@@ -15,7 +15,7 @@ async function pythonEnvironment(settings){
   const root=settings.modelPath,cache=path.join(root,'cache');
   const locations={HF_HOME:path.join(root,'huggingface'),HF_HUB_CACHE:path.join(root,'huggingface','hub'),TORCH_HOME:path.join(root,'torch'),XDG_CACHE_HOME:cache,NUMBA_CACHE_DIR:path.join(cache,'numba'),MPLCONFIGDIR:path.join(cache,'matplotlib'),CUDA_CACHE_PATH:path.join(cache,'cuda'),TORCH_EXTENSIONS_DIR:path.join(cache,'torch-extensions'),TEMP:path.join(root,'temp'),TMP:path.join(root,'temp')};
   await Promise.all(Object.values(locations).map(folder=>mkdir(folder,{recursive:true})));
-  return {...process.env,...locations,...(process.platform==='darwin'?{TMPDIR:locations.TEMP}:{}),PYTHONIOENCODING:'utf-8'};
+  return {...process.env,...locations,...(process.platform==='darwin'?{TMPDIR:locations.TEMP,PYTORCH_ENABLE_MPS_FALLBACK:'1'}:{}),PYTHONIOENCODING:'utf-8'};
 }
 // The Stem runtime check imports torch and initialises CUDA in a fresh Python. Right after the PC
 // starts this can take far longer than when warm, so it gets a generous limit; a result is reused while

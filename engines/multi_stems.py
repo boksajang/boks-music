@@ -14,9 +14,13 @@ def ensure_multi(root, progress=lambda message: None):
     for name, size, digest in FILES:
         dest = root/name
         if dest.is_file() and dest.stat().st_size == size:
+            # hashlib.file_digest needs Python 3.11; the macOS Stem environment is Python 3.10.
+            cached_digest = hashlib.sha256()
             with dest.open('rb') as cached:
-                if hashlib.file_digest(cached, 'sha256').hexdigest() == digest:
-                    continue
+                while block := cached.read(1024*1024):
+                    cached_digest.update(block)
+            if cached_digest.hexdigest() == digest:
+                continue
         progress('Multi-track 필수 모델 자동 설치 중 · ' + name)
         partial = dest.with_suffix(dest.suffix + '.partial')
         try:

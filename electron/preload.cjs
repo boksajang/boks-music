@@ -1,5 +1,7 @@
 const {contextBridge,ipcRenderer}=require('electron');
 contextBridge.exposeInMainWorld('boks',Object.freeze({
+  // Known before the first paint, so macOS never shows the Windows title bar controls first.
+  platform:process.platform,
   invoke:async(method,payload)=>{const response=await ipcRenderer.invoke('boks:invoke',method,payload);if(!response.ok)throw new Error(response.error);return response.data;},
   onUpdate:callback=>{const handler=()=>callback();ipcRenderer.on('boks:update',handler);return()=>ipcRenderer.removeListener('boks:update',handler);},
   onProgress:callback=>{const handler=(_event,value)=>callback(value);ipcRenderer.on('boks:progress',handler);return()=>ipcRenderer.removeListener('boks:progress',handler);},

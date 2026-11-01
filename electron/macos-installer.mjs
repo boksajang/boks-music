@@ -1,7 +1,7 @@
 import {spawn,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createInterface} from 'node:readline';
-import {mkdir,writeFile,chmod,copyFile} from 'node:fs/promises';
+import {mkdir,writeFile,chmod,copyFile,readdir} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import path from 'node:path';
 import {macosCatalog,macModelChoices} from './macos-model-catalog.mjs';
@@ -15,12 +15,21 @@ export function validateArchiveEntries(list){
   if(!entries.length||entries.some(item=>item.startsWith('/')||item.includes('\\')||item.split('/').includes('..')))throw new Error('배포 압축 파일의 경로가 올바르지 않습니다.');
   return entries;
 }
+// An archive with archiveSubdir keeps its files in that one top folder, which is dropped on extraction.
 async function extract(asset,archive,destination,context){
   await downloadVerified(asset,archive,context);
   const {stdout}=await exec('/usr/bin/tar',['-tzf',archive],{signal:context.signal,maxBuffer:4*1024*1024});
-  validateArchiveEntries(stdout);
+  const entries=validateArchiveEntries(stdout);
+  if(asset.archiveSubdir&&entries.some(item=>item.split('/')[0]!==asset.archiveSubdir))throw new Error('배포 압축 파일의 폴더 구성이 올바르지 않습니다.');
   await mkdir(destination,{recursive:true});
-  await exec('/usr/bin/tar',['-xzf',archive,'-C',destination],{signal:context.signal,maxBuffer:4*1024*1024});
+  await exec('/usr/bin/tar',['-xzf',archive,'-C',destination,...(asset.archiveSubdir?['--strip-components=1']:[])],{signal:context.signal,maxBuffer:4*1024*1024});
+}
+// The release archive may keep its files at the top or inside a folder; the executable is looked up.
+async function findFile(directory,name,depth=0){
+  const entries=await readdir(directory,{withFileTypes:true});
+  const found=entries.find(entry=>entry.isFile()&&entry.name===name);if(found)return path.join(directory,found.name);
+  if(depth<3)for(const entry of entries.filter(item=>item.isDirectory())){const file=await findFile(path.join(directory,entry.name),name,depth+1);if(file)return file;}
+  return null;
 }
 function setup(script,args,{signal,onProgress,log}){
   return new Promise((resolve,reject)=>{
@@ -47,7 +56,8 @@ export async function installMacRuntime({option,settings,engineDirectory,signal,
   try{
     const runtime=path.join(root,'audio-cpp-'+macosCatalog.runtime.version);
     await extract(macosCatalog.runtime,path.join(downloads,macosCatalog.runtime.sha256+'.tar.gz'),runtime,context);
-    const executable=path.join(runtime,macosCatalog.runtime.executable);
+    const executable=await findFile(runtime,macosCatalog.runtime.executable);
+    if(!executable)throw new Error('audio.cpp 실행 파일을 압축 파일에서 찾지 못했습니다.');
     await chmod(executable,0o755);
     const modelRoot=path.join(settings.modelPath,'gguf','audio-cpp',choice.id);await mkdir(modelRoot,{recursive:true});
     const selected=macosCatalog.models.filter(item=>item.filename===choice.backbone||item.filename==='yue2-vae-f32.gguf'||item.role==='transcriber');
@@ -56,7 +66,11 @@ export async function installMacRuntime({option,settings,engineDirectory,signal,
       const cache=path.join(downloads,asset.sha256+'-'+asset.filename);await downloadVerified(asset,cache,context);
       const target=path.join(modelRoot,asset.filename);await mkdir(path.dirname(target),{recursive:true});await copyFile(cache,target,constants.COPYFILE_FICLONE);resolved[asset.filename]=target;
     }
-    const deps=await setup(path.join(engineDirectory,'setup-macos.mjs'),['--runtime-root',root,'--model-root',settings.modelPath,'--download-models'],context);
+    // uv (the project Python installer) is fetched here because the setup script runs outside the app archive.
+    const uvRoot=path.join(root,'uv-'+macosCatalog.uv.version);
+    await extract(macosCatalog.uv,path.join(downloads,macosCatalog.uv.sha256+'.tar.gz'),uvRoot,context);
+    const uv=path.join(uvRoot,macosCatalog.uv.executable);await chmod(uv,0o755);
+    const deps=await setup(path.join(engineDirectory,'setup-macos.mjs'),['--runtime-root',root,'--model-root',settings.modelPath,'--uv',uv,'--download-models'],context);
     const installed={...deps.settings,musicBackend:'audio-cpp',nativeBackend:'metal',nativeExecutable:executable,audioCppModelRoot:modelRoot,backbonePath:resolved[choice.backbone],vaePath:resolved['yue2-vae-f32.gguf'],transcriberPath:resolved[macosCatalog.models.find(item=>item.role==='transcriber').filename],runtimePlatform:'darwin',runtimeArch:'arm64',engineSelection:{music:'audio-cpp-yue2',cover:'audio-cpp-sheetsage2',stems:'bs-roformer'}};
     const state=await inspectAudioCpp(installed);if(!state.music.available||!state.cover.available)throw new Error('macOS Native 구성 파일 검증에 실패했습니다.');
     if(signal?.aborted)throw new Error('설치가 취소되었습니다.');

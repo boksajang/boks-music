@@ -1,10 +1,9 @@
 // Apple Silicon companion environments. No compiler or source package builds.
 import {spawn} from 'node:child_process';
-import {readFile,mkdir,access,chmod} from 'node:fs/promises';
+import {mkdir,access} from 'node:fs/promises';
 import {createInterface} from 'node:readline';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {downloadVerified} from '../electron/download.mjs';
 
 const directory=path.dirname(fileURLToPath(import.meta.url));
 const event=(type,fields)=>process.stdout.write(JSON.stringify({type,...fields})+'\n');
@@ -14,6 +13,9 @@ const exists=file=>access(file).then(()=>true,()=>false);
 async function main(){
   if(process.platform!=='darwin'||process.arch!=='arm64')throw new Error('Apple Silicon macOS에서만 실행할 수 있습니다.');
   if(!argument('--runtime-root')||!argument('--model-root'))throw new Error('설치 폴더가 필요합니다.');
+  // uv is downloaded and verified by the app (electron/macos-installer.mjs): this script also runs from an
+  // installed app's resources, where the app's own modules are not beside it.
+  const uv=argument('--uv');if(!uv||!path.isAbsolute(uv)||!await exists(uv))throw new Error('프로젝트 Python 설치 도구(uv)가 필요합니다.');
   const runtimeRoot=path.resolve(argument('--runtime-root')),modelRoot=path.resolve(argument('--model-root'));
   const relative=path.relative(modelRoot,runtimeRoot);
   if(!relative||relative.startsWith('..')||path.isAbsolute(relative))throw new Error('실행 환경은 모델 폴더 안에 설치해야 합니다.');
@@ -35,12 +37,6 @@ async function main(){
       child.on('close',code=>{lines.close();if(code||failure||protocol&&!result)reject(new Error(failure||`필수 환경 준비 실패: ${path.basename(command)} (${code})`));else resolve(result);});
     });
   }
-  const catalog=JSON.parse((await readFile(path.join(directory,'macos-catalog.json'),'utf8')).replace(/^\uFEFF/,''));
-  const uvRoot=path.join(runtimeRoot,'uv-'+catalog.uv.version),archive=path.join(runtimeRoot,'uv-'+catalog.uv.version+'.tar.gz');
-  await downloadVerified(catalog.uv,archive,{onProgress:fields=>event('progress',fields)});
-  await mkdir(uvRoot,{recursive:true});
-  await run('/usr/bin/tar',['-xzf',archive,'-C',uvRoot,'--strip-components=1']);
-  const uv=path.join(uvRoot,catalog.uv.executable);await chmod(uv,0o755);
   const settings={};
   for(const current of profile==='all'?['stems-mps']:[profile]){
     // audio-separator's diffq dependency has an ARM64 wheel for CPython 3.10,
