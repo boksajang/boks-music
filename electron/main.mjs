@@ -44,7 +44,7 @@ import {inspectClaudeInstallation,readClaudeUsage,generateLyrics as generateClau
 import {removeBillingCredentials,inspectCodexBilling} from './cli-billing.mjs';
 import {resolveCodexExecutable} from './codex-discovery.mjs';
 import {resolveAgents} from './agent-selection.mjs';
-import {resolveDataRoot,dataPaths,clearTempFolder} from './data-root.mjs';
+import {resolveDataRoot,installedRoots,dataPaths,clearTempFolder} from './data-root.mjs';
 
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 let vocalCacheInstance;
@@ -55,12 +55,17 @@ removeBillingCredentials(process.env);
 app.setName('Boks Music');
 // App data (library, logs, video work folders, caches, the Chromium profile and temporary files) lives in the
 // project folder in development (<project>/app-data, data-root.mjs); tests use BOKS_DATA_DIR; an installed app
-// keeps Electron's userData.
-// (Asking Electron for its default userData creates that folder, so a development run never asks.)
-const dataRoot=resolveDataRoot({packaged:app.isPackaged,projectRoot:root,fallback:app.isPackaged&&!process.env.BOKS_DATA_DIR?app.getPath('userData'):''}),appPaths=dataPaths(dataRoot);
-// Engines and models: <project>/engine-packages in development; an installed app keeps them in its data folder
-// because its own folder is read-only (app.asar, usually under Program Files).
-const enginePackages=app.isPackaged?path.join(dataRoot,'engine-packages'):path.join(root,'engine-packages');
+// on Windows keeps the same layout in its install folder (installedRoots).
+// (Asking Electron for its default userData creates that folder, so its path is built from appData instead.)
+const installed=app.isPackaged&&!process.env.BOKS_DATA_DIR?installedRoots({platform:process.platform,installRoot:path.dirname(process.execPath),system:path.join(app.getPath('appData'),app.getName())}):null;
+if(installed&&!installed.writable){
+  dialog.showErrorBox('Boks Music',`설치 폴더에 파일을 저장할 수 없습니다.\n${installed.data}\n\nBoks Music은 엔진과 만든 곡을 모두 설치 폴더 안에 저장합니다. 앱을 제거한 뒤 다시 설치해 주세요.`);
+  process.exit(1);
+}
+const dataRoot=resolveDataRoot({packaged:app.isPackaged,projectRoot:root,fallback:installed?.data||''}),appPaths=dataPaths(dataRoot);
+// Engines and models: <project>/engine-packages in development, beside app-data in an installed app; a packaged
+// test run (BOKS_DATA_DIR) keeps them in its data folder.
+const enginePackages=!app.isPackaged?path.join(root,'engine-packages'):installed?installed.engines:path.join(dataRoot,'engine-packages');
 app.setPath('userData',dataRoot);app.setPath('sessionData',appPaths.chromium);
 // Temporary files of the app and of every child process (engines, ffmpeg, render profiles) stay in the data folder.
 for(const key of ['TEMP','TMP','TMPDIR'])process.env[key]=appPaths.temp;
