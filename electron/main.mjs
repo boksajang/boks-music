@@ -570,7 +570,7 @@ async function localArt(t,settings,{dir,signal,onProgress,jobId,prompt:planned})
   await log(`로컬 앨범아트 생성 ${seconds}초`,jobId);
   return output;
 }
-async function pickAudio(){const r=await dialog.showOpenDialog(window,{title:'음악 파일 선택',properties:['openFile'],filters:[{name:'Audio',extensions:['wav','flac','mp3','m4a','ogg']} ]});return r.canceled?null:r.filePaths[0];}
+async function pickAudio(){const r=await dialog.showOpenDialog(window,{title:'음악 파일 선택 · 여러 개 선택 가능',properties:['openFile','multiSelections'],filters:[{name:'Audio',extensions:['wav','flac','mp3','m4a','ogg']} ]});return r.canceled?[]:r.filePaths;}
 async function copyManaged(source,directory){const s=await stat(source);await ensureSpace(directory,s.size);const dest=path.join(directory,id()+path.extname(source).toLowerCase());await copyFile(source,dest);return dest;}
 async function saveSettings(payload){
   const next={...store.data.settings,...validateCodexSettings(store.data.settings,payload,codexModels),...validateClaudeSettings(store.data.settings,payload)};
@@ -807,8 +807,23 @@ const actions={
     const seeds=new Set();while(seeds.size<count)seeds.add(randomInt(0,2147483647));
     return queue.add([...seeds].map((seed,i)=>({projectId:p.projectId,parentId:parent?.id,presetId:p.presetId,instrumental:!!p.instrumental,...(p.instrumental?{instrumentalDuration:p.instrumentalDuration}:{}),operation,title:count>1?`${title} ${i+1}`:title,style,lyrics,seed,audioPath:parent?.audioPath,settings:{...store.data.settings}})));
   },
-  // Imported from a playlist page: the song joins the chosen project and that playlist.
-  importAudio:async p=>{const item=project(p.projectId),list=importPlaylist(p.playlistId);const source=await pickAudio();if(!source)return null;const audioPath=await copyManaged(source,path.join(item.directory,'imports'));const row=await addAudio({audioPath,projectId:item.id,title:path.basename(source,path.extname(source)),kind:'original',source:'import',importedAt:new Date().toISOString(),lyrics:'',style:'가져온 음악'});if(list){await addToPlaylist(store,{playlistId:list.id,ids:[row.id]});notify();}return row;},
+  // Imported from a playlist page: the songs join the chosen project and that playlist. Several files are taken
+  // in file name order; a file that cannot be read is skipped with its reason and the others are still imported.
+  importAudio:async p=>{
+    const item=project(p.projectId),list=importPlaylist(p.playlistId);
+    const sources=[...new Set(await pickAudio())].sort((a,b)=>path.basename(a).localeCompare(path.basename(b),'ko',{numeric:true}));
+    if(!sources.length)return null;
+    const rows=[],failed=[];
+    for(const source of sources){
+      let audioPath;
+      try{audioPath=await copyManaged(source,path.join(item.directory,'imports'));rows.push(await prepareAudio({audioPath,projectId:item.id,title:path.basename(source,path.extname(source)),kind:'original',source:'import',importedAt:new Date().toISOString(),lyrics:'',style:'가져온 음악'}));}
+      catch(error){if(audioPath)await rm(audioPath,{force:true}).catch(()=>{});failed.push({name:path.basename(source),reason:error.message});}
+    }
+    if(!rows.length)throw new Error(failed.map(row=>`${row.name}: ${row.reason}`).join(' / '));
+    await store.mutate(d=>d.tracks.push(...rows));
+    if(list)await addToPlaylist(store,{playlistId:list.id,ids:rows.map(row=>row.id)});
+    notify();return {tracks:rows,failed};
+  },
   extractYoutube:async p=>{
     project(p.projectId);const url=validateYoutubeUrl(p.url),list=importPlaylist(p.playlistId);
     const [job]=await queue.add([{operation:'youtubeExtract',projectId:p.projectId,...(list?{playlistId:list.id}:{}),url,title:'유튜브 음악 추출',settings:{...store.data.settings}}]);return {jobId:job.id};
