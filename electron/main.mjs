@@ -45,6 +45,7 @@ import {removeBillingCredentials,inspectCodexBilling} from './cli-billing.mjs';
 import {resolveCodexExecutable} from './codex-discovery.mjs';
 import {resolveAgents} from './agent-selection.mjs';
 import {resolveDataRoot,installedRoots,dataPaths,clearTempFolder} from './data-root.mjs';
+import {relocateRoots} from './relocate.mjs';
 
 const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 let vocalCacheInstance;
@@ -59,13 +60,15 @@ app.setName('Boks Music');
 // (Asking Electron for its default userData creates that folder, so its path is built from appData instead.)
 const installed=app.isPackaged&&!process.env.BOKS_DATA_DIR?installedRoots({platform:process.platform,installRoot:path.dirname(process.execPath),system:path.join(app.getPath('appData'),app.getName())}):null;
 if(installed&&!installed.writable){
-  dialog.showErrorBox('Boks Music',`설치 폴더에 파일을 저장할 수 없습니다.\n${installed.data}\n\nBoks Music은 엔진과 만든 곡을 모두 설치 폴더 안에 저장합니다. 앱을 제거한 뒤 다시 설치해 주세요.`);
+  dialog.showErrorBox('Boks Music',`이 폴더에 파일을 저장할 수 없습니다.\n${installed.data}\n\nBoks Music은 엔진과 만든 곡을 모두 앱 폴더 안에 저장합니다. 포터블 버전은 쓰기 권한이 있는 폴더(예: D:\\Apps)로 옮겨 실행하고, 설치 버전은 앱을 제거한 뒤 다시 설치해 주세요.`);
   process.exit(1);
 }
 const dataRoot=resolveDataRoot({packaged:app.isPackaged,projectRoot:root,fallback:installed?.data||''}),appPaths=dataPaths(dataRoot);
 // Engines and models: <project>/engine-packages in development, beside app-data in an installed app; a packaged
-// test run (BOKS_DATA_DIR) keeps them in its data folder.
-const enginePackages=!app.isPackaged?path.join(root,'engine-packages'):installed?installed.engines:path.join(dataRoot,'engine-packages');
+// test run (BOKS_DATA_DIR) keeps them in its data folder. A development test run may name its own engine folder
+// (BOKS_ENGINE_DIR, with BOKS_DATA_DIR only); otherwise it reads the real one and never relocates it.
+const testEngines=!app.isPackaged&&process.env.BOKS_DATA_DIR&&process.env.BOKS_ENGINE_DIR?path.resolve(process.env.BOKS_ENGINE_DIR):'';
+const enginePackages=testEngines||(!app.isPackaged?path.join(root,'engine-packages'):installed?installed.engines:path.join(dataRoot,'engine-packages'));
 app.setPath('userData',dataRoot);app.setPath('sessionData',appPaths.chromium);
 // Temporary files of the app and of every child process (engines, ffmpeg, render profiles) stay in the data folder.
 for(const key of ['TEMP','TMP','TMPDIR'])process.env[key]=appPaths.temp;
@@ -82,6 +85,8 @@ let lyricInstallation={ready:false,models:[],runtimeReady:false};
 let videoInstallation={available:false};
 const isMac=process.platform==='darwin';
 let desktopReady=false, youtubeImporter;
+// Set at startup when the app folder was moved (relocate.mjs): shown once as a notice.
+let relocation=null;
 const youtubeFinishing=new Set();
 const videoDirectories=new Set(),videoBackgrounds=new Map();
 const resumingVideos=new Set();
@@ -196,7 +201,7 @@ const options=()=>installationOptions(system,policySettings()).map(x=>{const act
 function timingAfterLyrics(t,lyrics,options){const current=t.lyricTiming?.cues?.length&&t.lyricTiming.lyricsHash===hashLyrics(t.lyrics||'')?t.lyricTiming:null;return {current,...(current?remapLyricTiming(current,lyrics,options):{timing:undefined,kept:0,changed:0,added:0,removed:0})};}
 const visibleTrack=t=>({...t,...(()=>{const timing=lyricTimingState(t);return timing.state?{lyricState:timing.state,lyricReview:timing.review}:{};})(),...(()=>{if(t.kind==='stem'||!String(t.lyrics||'').trim())return {};const lines=lyricLines(t.lyrics);const support=lines.length?lyricAlignmentSupport({lines,duration:Number(t.duration)}):{supported:true};return support.supported?{}:{lyricAutoReason:support.reason};})(),...(t.kind==='stem'?{stemName:stemLabel(t.audioPath),stemMode:t.metadata?.stemMode||'two'}:{}),...(t.kind==='mastered'&&!t.originKind?{originKind:originKind(t)}:{}),audioUrl:media(t.id),artUrl:t.artPath?media(t.id,'art',t.artPath):undefined});
 const recommendationState=()=>{const result=installationRecommendation(system,policySettings());return {...result,installed:result.optionId===recommendedInstallation.optionId&&recommendedInstallation.installed};};
-const snapshot=()=>({...store.data,host:{platform:process.platform,arch:process.arch},projects:store.data.projects.filter(row=>!row.deletedAt),presets:[...presets,...store.data.customPresets],videos:store.data.videos.map(row=>({...row,videoUrl:'boks-media://video/'+row.id})),tracks:store.data.tracks.filter(t=>!t.trashedAt).map(visibleTrack),trash:store.data.tracks.filter(t=>t.trashedAt).map(visibleTrack),jobs:store.data.jobs.map(({request,...j})=>({...j,projectId:request?.projectId,...(request?.trackId?{trackId:request.trackId}:{}),...(request?.playlistId?{playlistId:request.playlistId,trackCount:request.trackIds?.length||0,...(j.type==='video'?{videoOptions:pickVideoOptions(request.options),videoTitle:request.title}:{})}:{})})),system,engines,lyricInstallation,videoInstallation,localImage,installOptions:options(),installedEngines:installedEngineChoices(engines),installationRecommendation:recommendationState(),codexModels,codexError,codexStatus,codexUsage,codexAccess:codexBilling.pending?{state:'checking'}:codexBilling,claudeStatus,claudeUsage:claudeUsageView(),claudeModels,agents:agentState()});
+const snapshot=()=>({...store.data,host:{platform:process.platform,arch:process.arch},projects:store.data.projects.filter(row=>!row.deletedAt),presets:[...presets,...store.data.customPresets],videos:store.data.videos.map(row=>({...row,videoUrl:'boks-media://video/'+row.id})),tracks:store.data.tracks.filter(t=>!t.trashedAt).map(visibleTrack),trash:store.data.tracks.filter(t=>t.trashedAt).map(visibleTrack),jobs:store.data.jobs.map(({request,...j})=>({...j,projectId:request?.projectId,...(request?.trackId?{trackId:request.trackId}:{}),...(request?.playlistId?{playlistId:request.playlistId,trackCount:request.trackIds?.length||0,...(j.type==='video'?{videoOptions:pickVideoOptions(request.options),videoTitle:request.title}:{})}:{})})),system,engines,lyricInstallation,videoInstallation,localImage,installOptions:options(),installedEngines:installedEngineChoices(engines),installationRecommendation:recommendationState(),codexModels,codexError,codexStatus,codexUsage,codexAccess:codexBilling.pending?{state:'checking'}:codexBilling,...(relocation?{relocation}:{}),claudeStatus,claudeUsage:claudeUsageView(),claudeModels,agents:agentState()});
 // Codex counts as usable only after its login has been confirmed as a ChatGPT subscription.
 const codexAgentStatus=()=>codexStatus.state!=='installed'?codexStatus:codexBilling.pending?{...codexStatus,state:'checking'}:{...codexStatus,usable:codexBilling.usable,...(codexBilling.message?{message:codexBilling.message}:{})};
 let localImage={families:[],installed:[],engineInstalled:false,recommendedId:null,checked:false};
@@ -1007,6 +1012,9 @@ try{
   if(isMac&&!app.isPackaged)app.dock?.setIcon(path.join(root,'assets','icon.png'));
   await mkdir(path.dirname(appPaths.log),{recursive:true});await clearTempFolder(dataRoot);
   store=await new Store(app.getPath('userData')).init();
+  // A moved or copied app folder: stored paths under the old location follow it before anything reads them.
+  try{const moved=await relocateRoots({store,dataRoot,engineRoot:!app.isPackaged&&process.env.BOKS_DATA_DIR&&!testEngines?null:enginePackages});if(moved.moved.length||moved.failures.length){relocation=moved;await log(`앱 폴더 위치 변경: ${moved.moved.map(row=>`${row.from} → ${row.to}`).join(', ')} · 경로 ${moved.changed}곳 수정${moved.failures.length?` · 실패 ${moved.failures.map(row=>`${row.file}: ${row.reason}`).join(' / ')}`:''}`);}}
+  catch(error){relocation={moved:[],changed:0,failures:[{file:'',reason:error.message}]};await log(error);}
   // Composer drafts live for this app session; saved songs and job requests remain intact.
   await store.mutate(d=>{d.settings.modelPath=enginePackages;for(const project of d.projects)project.draft={};for(const job of d.jobs)if(job.type==='youtubeExtract'&&job.result?.sessionId&&!job.result.importedTrackId)job.result.expired=true;});
   const discovered=Object.values(await readInstalls(store.data.settings.modelPath)).filter(x=>x.status==='installed'&&x.result).sort((a,b)=>String(b.installedAt).localeCompare(String(a.installedAt)))[0];
