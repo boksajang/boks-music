@@ -26,9 +26,21 @@ async function probeStemRuntime(settings,runner){
   const key=[settings.stemPython,stamp,runner,settings.modelPath].join('|');
   if(!probes.has(key))probes.set(key,(async()=>{
     try{const {stdout}=await exec(settings.stemPython,[runner,'--probe'],{windowsHide:true,timeout:PROBE_TIMEOUT_MS,env:await pythonEnvironment(settings)});return {result:JSON.parse(stdout.trim().split('\n').at(-1))};}
-    catch(error){probes.delete(key);return {error:error.killed||error.signal?'실행 환경 확인 시간이 초과되었습니다':'실행 환경 확인에 실패했습니다'};}
+    catch(error){probes.delete(key);return {error:error.killed||error.signal?'실행 환경 확인 시간이 초과되었습니다':'실행 환경 확인에 실패했습니다',detail:probeFailure(error)};}
   })());
   return probes.get(key);
+}
+/**
+ * What went wrong in a failed check, for the settings and the detail log (a bare "확인 실패" gives a user
+ * nothing to report): Python's last error line (ModuleNotFoundError, a DLL load failure, …), the unreadable
+ * output, or the start error.
+ */
+export function probeFailure(error){
+  if(error?.killed||error?.signal)return `${Math.round(PROBE_TIMEOUT_MS/1000)}초`;
+  if(error?.code==='ENOENT')return 'Python 실행 파일을 찾을 수 없습니다';
+  const lines=String(error?.stderr||'').split(/\r?\n/).map(line=>line.trim()).filter(Boolean);
+  const line=lines.findLast(text=>/(Error|Exception|error:)/.test(text))||lines.at(-1)||(error instanceof SyntaxError?'확인 결과를 읽을 수 없습니다':String(error?.message||error||''));
+  return line.length>220?line.slice(0,217)+'…':line;
 }
 /** 시스템 재검사: checks the runtimes again instead of reusing earlier results. */
 export function clearEngineProbes(){probes.clear();}
@@ -45,7 +57,7 @@ export async function engineStates(settings,runner) {
     {id:'music',name:process.platform==='darwin'?'YuE2 / audio.cpp':'YuE2 / yue2.cpp',...native.music,capabilities:native.capabilities},
     {id:'cover',name:process.platform==='darwin'?'SheetSage2 / audio.cpp':'SheetSage2 / yue2.cpp',...native.cover},
     // A check that failed or timed out is not a missing installation: it asks for a rescan, not a reinstall.
-    checked.error?{id:'stems',name:'BS-RoFormer',available:false,status:'check-failed',message:`${checked.error}. 시스템 재검사로 다시 확인하세요.`}
+    checked.error?{id:'stems',name:'BS-RoFormer',available:false,status:'check-failed',detail:checked.detail||'',message:`${checked.error}${checked.detail?` (${checked.detail})`:''}. 시스템 재검사로 다시 확인하세요.`}
     :{id:'stems',name:'BS-RoFormer',available:stems,message:stems?`${device.toUpperCase()} 런타임과 모델 확인됨 · 청취 검증 별도`:missing}
   ].map(e=>({...e,engineId:defaultEngineSelection[e.id],status:e.status||(e.available?'ready':'not-installed')}));
 }

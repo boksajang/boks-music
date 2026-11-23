@@ -17,6 +17,17 @@ const catalogPath = existsSync(developmentCatalog) ? developmentCatalog : path.j
 const exists = async p => !!p && !!(await fs.stat(p).catch(() => null))?.isFile();
 const aborted = signal => { if (signal?.aborted) throw new Error('작업이 취소되었습니다.'); };
 async function pause(ms, signal) { aborted(signal); await new Promise(resolve => setTimeout(resolve, ms)); aborted(signal); }
+/**
+ * yue-server opens files through the Windows ANSI code page, so a model under a folder with a Korean (or any
+ * non-ASCII) name fails to open ("failed to open GGUF file"). It runs in its own folder, so the model, VAE,
+ * transcriber, adapter and CUDA DLL paths are passed relative to it whenever that relative path is plain ASCII
+ * (the engine folder layout always is); otherwise the absolute path stays (another drive, a non-ASCII model folder).
+ */
+export function serverPath(serverDir, file, platform = process.platform) {
+  if (platform !== 'win32' || !file) return file;
+  const relative = path.win32.relative(serverDir, file);
+  return relative && !path.win32.isAbsolute(relative) && /^[\x20-\x7e]+$/.test(relative) ? relative : file;
+}
 async function catalog() { return JSON.parse((await fs.readFile(catalogPath, 'utf8')).replace(/^\uFEFF/, '')); }
 
 export function nativeBackendDevice(backend, platform=process.platform) {
@@ -153,12 +164,13 @@ export async function runNative(request, { signal, onProgress = () => {}, log = 
   if (backend === 'cuda') {
     const folder = s.nativeCudaVariant || 'cuda13';
     if (!['cuda12','cuda13'].includes(folder)) throw new Error('CUDA backend 선택이 올바르지 않습니다.');
-    env.YUE_CUDA_BACKEND = path.join(exeDir, folder, 'ggml-cuda.dll');
-    if (!await exists(env.YUE_CUDA_BACKEND)) throw new Error('선택한 CUDA backend DLL이 없습니다.');
+    const dll = path.join(exeDir, folder, 'ggml-cuda.dll');
+    if (!await exists(dll)) throw new Error('선택한 CUDA backend DLL이 없습니다.');
+    env.YUE_CUDA_BACKEND = serverPath(exeDir, dll);
   }
-  const args = ['--model',s.backbonePath,'--vae',s.vaePath,'--host','127.0.0.1','--port',String(port),'--max-batch','1'];
-  if (request.operation === 'cover') args.push('--transcriber',s.transcriberPath);
-  if (instrumentalAdapter) args.push('--adapters',instrumentalAdapter.directory);
+  const args = ['--model',serverPath(exeDir,s.backbonePath),'--vae',serverPath(exeDir,s.vaePath),'--host','127.0.0.1','--port',String(port),'--max-batch','1'];
+  if (request.operation === 'cover') args.push('--transcriber',serverPath(exeDir,s.transcriberPath));
+  if (instrumentalAdapter) args.push('--adapters',serverPath(exeDir,instrumentalAdapter.directory));
   if (backend === 'vulkan') args.push('--clamp-fp16');
   aborted(signal);
   const child = spawn(s.nativeExecutable,args,{cwd:exeDir,env,windowsHide:true,stdio:['ignore','pipe','pipe']});

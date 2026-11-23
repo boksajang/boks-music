@@ -213,7 +213,14 @@ async function refreshLocalImage(){
   if(generation===imageRefresh){localImage=next;notify();}
   return localImage;
 }
-const agentState=()=>resolveAgents({settings:store.data.settings,codexStatus:codexAgentStatus(),claudeStatus,localImage:{ready:localImage.installed.includes(store.data.settings.localImageModel),checking:!localImage.checked}});
+const agentState=()=>{
+  const settings=store.data.settings,codex=codexAgentStatus(),checking=!localImage.checked;
+  const state=resolveAgents({settings,codexStatus:codex,claudeStatus,localImage:{ready:localImage.installed.includes(settings.localImageModel),checking}});
+  // The settings page follows the image engine being chosen before it is saved (an installed model the user
+  // picks counts as ready; the page itself checks that the picked model is installed).
+  const engine=imageEngine=>{const row=resolveAgents({settings:{...settings,imageEngine},codexStatus:codex,claudeStatus,localImage:{ready:imageEngine!=='local'||localImage.installed.length>0,checking}});return {imageAgent:row.imageAgent,imageReason:row.imageReason};};
+  return {...state,imageByEngine:{agent:engine('agent'),local:engine('local')}};
+};
 const agentUnavailable=id=>{const status=id==='claude'?claudeStatus:codexAgentStatus();return status.state==='installed'&&status.usable===false?status.message:`${id==='claude'?'Claude Code':'Codex'}가 설치되어 있지 않아 선택할 수 없습니다.`;};
 const claudeUsageView=()=>{
   if(claudeStatus.usable===false)return {state:'unavailable',message:claudeStatus.message};
@@ -287,7 +294,7 @@ async function videoRendererState(){
   return {available:ffmpeg,name:'GPU 캔버스 · WebCodecs',message:ffmpeg?'가사·연주곡 영상 렌더링 · GPU H.264 인코딩':'음악 결합에 필요한 FFmpeg가 없습니다. YuE2 모델 통합 설치에 포함됩니다.'};
 }
 // Engine checks can overlap (a cold Stem check takes minutes): only the latest one's results are kept.
-let engineRefresh=0;
+let engineRefresh=0,loggedStemCheck='';
 async function refreshEngines(){
   const generation=++engineRefresh,settings=store.data.settings;
   void refreshLocalImage();
@@ -297,6 +304,10 @@ async function refreshEngines(){
   const option=installationOptions(system,policySettings()).find(item=>item.id===recommendation.optionId);
   const nextRecommended={optionId:recommendation.optionId,installed:nextLyric.ready&&await recommendedBundleInstalled({option,receipt:nextInstalls[recommendation.optionId],settings,runner})};
   if(generation!==engineRefresh)return;
+  // A failed Stem check goes to the detail log once per distinct reason, so a user can send it.
+  const stemCheck=nextEngines.find(item=>item.id==='stems'&&item.status==='check-failed');
+  if(stemCheck&&stemCheck.message!==loggedStemCheck)void log(`BS-RoFormer 실행 환경 확인 실패: ${stemCheck.message} · Python ${settings.stemPython}`,'engines');
+  loggedStemCheck=stemCheck?.message||'';
   engines=nextEngines;installs=nextInstalls;lyricInstallation=nextLyric;videoInstallation=nextVideo;recommendedInstallation=nextRecommended;
   notify();
 }
@@ -451,8 +462,10 @@ async function runJob(job,signal,onProgress){
   }
   if(request.operation==='imageInstall'){
     const result=await installImageVariant({root:store.data.settings.modelPath,system,variantId:request.variantId,signal,onProgress,log:message=>log(message,job.id)});
-    // The first installed model becomes the selected one.
-    if(!store.data.settings.localImageModel)await store.mutate(d=>{d.settings.localImageModel=result.variantId;});
+    // The first local model is selected; without Codex (the agent engine's only image tool) the local engine
+    // becomes the image engine, otherwise album art would stay unavailable right after the install.
+    const switchEngine=store.data.settings.imageEngine!=='local'&&!agentState().imageAgent;
+    if(!store.data.settings.localImageModel||switchEngine)await store.mutate(d=>{if(!d.settings.localImageModel)d.settings.localImageModel=result.variantId;if(switchEngine)d.settings.imageEngine='local';});
     await refreshEngines();return result;
   }
   const dir=await workdir(request.storageProjectId||request.projectId,job.id);
